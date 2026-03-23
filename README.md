@@ -1,79 +1,150 @@
 # deep_research
 
-Local **deep research** CLI: **LangGraph** orchestration, **Ollama** for the LLM, **DuckDuckGo** (via **`ddgs`**) for discovery, then **full-page fetch** (**`httpx` + `trafilatura`**) for the top N URLs each round so the model sees real page text—not only snippets. It streams phases and model tokens to the terminal and produces a **long-form Markdown report**: after research loops it **plans an outline** (`plan_outline`), then **writes each section in a separate LLM pass** (`write_report`) for more depth, with inline **`[n]` citations** and a references section (`## 参考文献` / `## References`) built from retrieved URLs (deduplicated). **Default prompt language is Japanese**; use `--lang en` for English.
+> [English README](README_EN.md)
 
-## Setup
+ローカル動作の **ディープリサーチ CLI**。**LangGraph** でグラフを構成し、**Ollama** を LLM として使用、**DuckDuckGo**（`ddgs`）で検索、**httpx + trafilatura** でページ本文を取得。
 
-1. [Install Ollama](https://ollama.com/) and pull a model (reasoning-oriented example):
+トピックをまず **N 個のサブトピックに分解**し（`plan_research`）、サブトピックごとに「検索 → フェッチ → 要約 → 反省」のループを繰り返し、十分な情報が集まった時点でそのサブトピックの節を **Markdown ファイルに即時書き出し**（`write_section`）してから次のサブトピックに進みます。ローカルの文脈ウィンドウを節約しながら **長文レポート**を生成できます。
 
-   ```bash
-   ollama pull deepseek-r1:8b
-   ```
+---
 
-2. Python 3.11+ and a virtualenv:
+## グラフの流れ
 
-   ```bash
-   cd /path/to/deep-research
-   python3 -m venv .venv
-   source .venv/bin/activate
-   pip install -e .
-   ```
+```mermaid
+sequenceDiagram
+    actor User
+    participant Graph as LangGraph
+    participant LLM as Ollama LLM
+    participant DDG as DuckDuckGo
+    participant Web as Web Pages
+    participant File as report_*.md
 
-3. Optional `.env` (same keys work as environment variables):
+    User->>Graph: topic（調査テーマ）
 
-   ```env
-   OLLAMA_BASE_URL=http://127.0.0.1:11434
-   OLLAMA_MODEL=deepseek-r1:8b
-   DEEP_RESEARCH_MAX_LOOPS=3
-   DEEP_RESEARCH_MAX_RESULTS=5
-   DEEP_RESEARCH_LANG=ja
-   DEEP_RESEARCH_MAX_SECTIONS=7
-   DEEP_RESEARCH_FETCH_PAGES=8
-   DEEP_RESEARCH_SEARCH_WORKERS=4
-   DEEP_RESEARCH_FETCH_WORKERS=4
-   ```
+    Graph->>LLM: plan_research
+    Note right of LLM: テーマを N 個のサブトピックに分解
+    LLM-->>Graph: ["サブトピック1", "サブトピック2", ...]
 
-## Run
+    loop サブトピックごとに繰り返し（N 回）
+        Graph->>Graph: advance_plan
+        Note right of Graph: サブトピックをセット・状態リセット
 
-```bash
-python -m deep_research "Your research question" --out report.md
+        loop 調査ループ（反省で more=true の間）
+            Graph->>LLM: generate_similar_questions
+            LLM-->>Graph: 検索クエリ群
+
+            Graph->>DDG: web_research（並列）
+            DDG-->>Graph: URL + スニペット
+
+            Graph->>Web: fetch_pages（並列）
+            Web-->>Graph: ページ本文テキスト
+
+            Graph->>LLM: summarize_sources
+            LLM-->>Graph: 作業用要約
+
+            Graph->>LLM: reflect_on_summary
+            LLM-->>Graph: need_more_research: true / false
+        end
+
+        Graph->>LLM: write_section
+        LLM-->>Graph: ## サブトピック の本文
+
+        Graph->>File: セクションをディスクに即時書き出し
+    end
+
+    Graph-->>User: output_file_path
 ```
 
-Or use the console script:
+---
+
+## セットアップ
+
+### 1. Ollama のインストールとモデルの取得
+
+[Ollama をインストール](https://ollama.com/)し、モデルを pull します（推論特化モデルの例）:
 
 ```bash
-deep-research "Your research question" -o report.md
+ollama pull deepseek-r1:8b
 ```
 
-Flags:
+### 2. Python 環境の構築（Python 3.11 以上）
 
-| Flag | Meaning |
-|------|--------|
-| `--out` / `-o` | Write the final Markdown file |
-| `--model` | Ollama model name (overrides `OLLAMA_MODEL`) |
-| `--base-url` | Ollama server URL (overrides `OLLAMA_BASE_URL`) |
-| `--max-loops` | Reflection loop cap (default 3) |
-| `--max-results` | DuckDuckGo results per query (default 5) |
-| `--search-workers` | Parallel DDG queries per round (default 4, max 16; `1` = sequential; or `DEEP_RESEARCH_SEARCH_WORKERS`) |
-| `--lang` | `ja` (default) or `en` — system/human prompts and reference heading (or `DEEP_RESEARCH_LANG`) |
-| `--max-sections` | Max outline sections (capped 4–12, default 7; or `DEEP_RESEARCH_MAX_SECTIONS`) |
-| `--fetch-pages` `[N]` | **On by default** (8 pages/round, or `DEEP_RESEARCH_FETCH_PAGES`). Pass `N` to override; `--fetch-pages` alone uses the default. |
-| `--fetch-workers` | Parallel full-page HTTP fetches (default 4, max 16; `1` = sequential; or `DEEP_RESEARCH_FETCH_WORKERS`) |
-| `--no-fetch-pages` | Turn off full-page fetch (snippets only). |
+```bash
+cd /path/to/deep-research
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
 
-## Graph flow
+### 3. `.env` の作成（任意）
 
-`generate_similar_questions` → `web_research` → **`fetch_pages`** → `summarize_sources` → `reflect_on_summary` → (optional loop) → **`plan_outline`** → **`write_report`** → end.
+```env
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=deepseek-r1:8b
+DEEP_RESEARCH_MAX_LOOPS=3
+DEEP_RESEARCH_MAX_RESULTS=5
+DEEP_RESEARCH_LANG=ja
+DEEP_RESEARCH_MAX_PLANS=6
+DEEP_RESEARCH_FETCH_PAGES=8
+DEEP_RESEARCH_SEARCH_WORKERS=4
+DEEP_RESEARCH_FETCH_WORKERS=4
+```
 
-Reflection may loop back to `generate_similar_questions` until the model is satisfied or `--max-loops` is reached. Similar search strings are printed **one per line** (raw model JSON for that node is not streamed to the terminal). The final stage builds a **multi-section** report (executive summary, background, key facts, process, limitations, etc., as the model plans), then appends references.
+---
 
-## Tool calling vs JSON
+## 実行
 
-Search is **not** left to the model’s native tool calling (which can be flaky on some reasoning models). The graph calls **DuckDuckGo inside `web_research`** (several queries can run **in parallel**, each with its own client; tune with `--search-workers`). Query generation and reflection use **JSON-shaped** model outputs with a small parser (including Markdown JSON code fences) so the flow stays reliable.
+```bash
+python -m deep_research "調査したいテーマ" --out report.md
+```
 
-## Troubleshooting
+またはコンソールスクリプトで:
 
-- **`Connection refused` to Ollama**: start `ollama serve` and check `--base-url`.
-- **Empty or odd JSON from the model**: try a smaller/faster model (e.g. `llama3.2`) or lower temperature in `nodes.py` (`ChatOllama(..., temperature=0.2)`).
-- **DuckDuckGo errors / rate limits**: reduce `--max-results`, use `--search-workers 1` (sequential), or fewer queries; the CLI prints search errors per query without stopping the whole run.
-- **Fetch errors / empty page text**: many sites block bots or need JavaScript; use **`--no-fetch-pages`** (or `DEEP_RESEARCH_FETCH_PAGES=0`) to disable. Some pages return `skip_non_html` if the MIME type is not HTML. If you see many HTTP 429s, try **`--fetch-workers 1`**.
+```bash
+deep-research "調査したいテーマ" -o report.md
+```
+
+### オプション一覧
+
+| フラグ                  | 説明                                                                                                      |
+| ----------------------- | --------------------------------------------------------------------------------------------------------- |
+| `--out` / `-o`          | 出力 Markdown ファイルのパス（省略時は `report_<テーマ>.md` として自動生成）                              |
+| `--model`               | Ollama モデル名（`OLLAMA_MODEL` を上書き）                                                                |
+| `--base-url`            | Ollama サーバー URL（`OLLAMA_BASE_URL` を上書き）                                                         |
+| `--max-loops`           | サブトピックごとの反省ループ上限（デフォルト 3）                                                          |
+| `--max-results`         | クエリあたりの DuckDuckGo 結果件数（デフォルト 5）                                                        |
+| `--search-workers`      | 並列 DDG 検索数（デフォルト 4、最大 16；`1` = 逐次；`DEEP_RESEARCH_SEARCH_WORKERS`）                      |
+| `--lang`                | `ja`（デフォルト）または `en` — プロンプト言語（`DEEP_RESEARCH_LANG`）                                    |
+| `--max-plans`           | 生成するサブトピック数の上限（3〜8、デフォルト 6；`DEEP_RESEARCH_MAX_PLANS`）                             |
+| `--fetch-pages [N]`     | ラウンドごとのフルページ取得数（デフォルト 8；`DEEP_RESEARCH_FETCH_PAGES`）。`--fetch-pages` のみで既定値 |
+| `--fetch-workers`       | 並列 HTTP フェッチ数（デフォルト 4、最大 16；`1` = 逐次；`DEEP_RESEARCH_FETCH_WORKERS`）                  |
+| `--no-fetch-pages`      | フルページ取得を無効化（スニペットのみで動作）                                                            |
+
+---
+
+## 出力ファイルの構造
+
+```markdown
+# 調査テーマ
+
+## サブトピック 1
+（調査結果の本文・引用 [1][2]…）
+
+### 参考文献
+1. タイトル — URL
+   _スニペット_
+
+## サブトピック 2
+…
+```
+
+各サブトピックの節は研究が完了した時点でファイルに**即時書き込み**されます。次のサブトピックに移る前に前の節の情報はメモリから解放されます。
+
+---
+
+## トラブルシューティング
+
+- **`Connection refused` (Ollama)**: `ollama serve` を起動し `--base-url` を確認してください。
+- **JSON パースエラー**: 小さいモデル（例: `llama3.2`）を試すか、`nodes.py` の `temperature` を下げてください。
+- **DuckDuckGo レート制限**: `--max-results` を減らす、`--search-workers 1` で逐次実行、またはしばらく待ってください。
+- **ページ取得エラー**: Bot ブロックや JavaScript 必須のサイトが多い場合は `--no-fetch-pages` を使用してください。HTTP 429 が多発する場合は `--fetch-workers 1` を試してください。
