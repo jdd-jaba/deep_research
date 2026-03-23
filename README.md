@@ -27,14 +27,14 @@ sequenceDiagram
 
     loop サブトピックごとに繰り返し（N 回）
         Graph->>Graph: advance_plan
-        Note right of Graph: サブトピックをセット・状態リセット
+        Note right of Graph: サブトピックをセット・状態リセット・ソースID オフセット設定
 
         loop 調査ループ（反省で more=true の間）
             Graph->>LLM: generate_similar_questions
             LLM-->>Graph: 検索クエリ群
 
             Graph->>DDG: web_research（並列）
-            DDG-->>Graph: URL + スニペット
+            DDG-->>Graph: URL + スニペット（グローバル連番 ID）
 
             Graph->>Web: fetch_pages（並列）
             Web-->>Graph: ページ本文テキスト
@@ -47,10 +47,14 @@ sequenceDiagram
         end
 
         Graph->>LLM: write_section
-        LLM-->>Graph: ## サブトピック の本文
+        LLM-->>Graph: ## サブトピック の本文（参考文献なし）
 
-        Graph->>File: セクションをディスクに即時書き出し
+        Graph->>File: セクション本文をディスクに即時書き出し
+        Note right of File: ソース情報を all_sources に蓄積
     end
+
+    Graph->>File: finalize_report
+    Note right of File: ## 参考文献 を末尾に一括追記
 
     Graph-->>User: output_file_path
 ```
@@ -130,15 +134,21 @@ deep-research "調査したいテーマ" -o report.md
 ## サブトピック 1
 （調査結果の本文・引用 [1][2]…）
 
-### 参考文献
-1. タイトル — URL
-   _スニペット_
-
 ## サブトピック 2
+（調査結果の本文・引用 [3][4]…）
+
+## 参考文献
+1. タイトル A — URL
+   _スニペット_
+2. タイトル B — URL
+   _スニペット_
+3. タイトル C — URL
 …
 ```
 
-各サブトピックの節は研究が完了した時点でファイルに**即時書き込み**されます。次のサブトピックに移る前に前の節の情報はメモリから解放されます。
+- 各セクションの本文はリサーチ完了後に**即時ディスク書き込み**されます。
+- ソース引用番号（`[n]`）は全サブトピックを通じて**グローバルに連番**が振られます。
+- 参考文献は最後にまとめて一括追記（`finalize_report`）されるため、途中経過でも中断後もファイルを参照できます。
 
 ---
 

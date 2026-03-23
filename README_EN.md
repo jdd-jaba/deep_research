@@ -27,14 +27,14 @@ sequenceDiagram
 
     loop For each subtopic (N iterations)
         Graph->>Graph: advance_plan
-        Note right of Graph: Set subtopic as topic, reset per-plan state
+        Note right of Graph: Set subtopic, reset per-plan state, set source ID offset
 
         loop Research loop (while need_more_research = true)
             Graph->>LLM: generate_similar_questions
             LLM-->>Graph: search queries
 
             Graph->>DDG: web_research (parallel)
-            DDG-->>Graph: URLs + snippets
+            DDG-->>Graph: URLs + snippets (globally numbered IDs)
 
             Graph->>Web: fetch_pages (parallel)
             Web-->>Graph: page text
@@ -47,10 +47,14 @@ sequenceDiagram
         end
 
         Graph->>LLM: write_section
-        LLM-->>Graph: ## Subtopic section body
+        LLM-->>Graph: ## Subtopic body (no references)
 
-        Graph->>File: flush section to disk immediately
+        Graph->>File: flush section body to disk immediately
+        Note right of File: accumulate sources into all_sources
     end
+
+    Graph->>File: finalize_report
+    Note right of File: append single ## References block at the end
 
     Graph-->>User: output_file_path
 ```
@@ -130,15 +134,21 @@ deep-research "Your research question" -o report.md
 ## Subtopic 1
 (body text with inline citations [1][2]…)
 
-### References
-1. Title — URL
-   _snippet_
-
 ## Subtopic 2
+(body text with inline citations [3][4]…)
+
+## References
+1. Title A — URL
+   _snippet_
+2. Title B — URL
+   _snippet_
+3. Title C — URL
 …
 ```
 
-Each section is **written to disk immediately** after its research loop completes. Per-plan state (sources, summaries) is cleared before the next subtopic begins.
+- Each section body is **flushed to disk immediately** after its research loop completes.
+- Source citation numbers (`[n]`) are **globally sequential** across all subtopics.
+- References are appended in one block at the very end by `finalize_report`, so the file is readable even if the run is interrupted mid-way.
 
 ---
 
