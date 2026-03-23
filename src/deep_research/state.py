@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 
 @dataclass
@@ -16,7 +16,7 @@ class Configuration:
     max_results_per_query: int = 5
     search_parallel_workers: int = 4  # DuckDuckGo queries in parallel (1 = sequential)
     language: str = "ja"  # prompt locale: "ja" (default) or "en"
-    max_report_sections: int = 7  # cap outline sections for multi-pass report
+    max_plan_sections: int = 6  # number of subtopics plan_research generates (4–8)
     max_fetch_pages: int = 12  # full-page fetches after search (0 = off)
     fetch_parallel_workers: int = 4  # concurrent HTTP fetches (1 = sequential)
     fetch_timeout: float = 20.0
@@ -27,23 +27,41 @@ class Configuration:
 
 class SummaryStateInput(TypedDict):
     topic: str
+    output_file_path: NotRequired[str]  # optional override; derived from topic if omitted
 
 
 class SummaryStateOutput(TypedDict):
-    final_document: str
+    output_file_path: str
 
 
 class SummaryState(TypedDict, total=False):
     """Full graph state."""
 
+    # Original user topic — constant throughout the run
+    main_topic: str
+    # Current subtopic — set by advance_plan before each research loop
     topic: str
+
+    # Research plan (list of subtopic strings, produced by plan_research)
+    research_plans: list[str]
+    current_plan_index: int  # index into research_plans; incremented by write_section
+
+    # Accumulated written section markdown (for anti-repetition context)
+    written_sections: list[str]
+
+    # Output file path (derived from topic or provided by caller)
+    output_file_path: str
+
+    # Global source accumulator — slim records (id, title, url, snippet) across all plans
+    all_sources: list[dict]
+    # Number of sources collected before the current plan; used to offset source IDs
+    source_id_offset: int
+
+    # Per-plan state — reset by advance_plan on each iteration
     search_queries: list[str]
     sources: list[dict]
     working_summary: str
     reflection_text: str
     need_more_research: bool
     loop_count: int
-    final_document: str
     last_search_preview: str
-    report_title: str
-    report_outline: list[dict]

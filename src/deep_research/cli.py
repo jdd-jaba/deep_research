@@ -1,4 +1,4 @@
-"""CLI: stream graph execution and write optional Markdown report."""
+"""CLI: stream graph execution; the graph writes the Markdown report to disk directly."""
 
 from __future__ import annotations
 
@@ -12,6 +12,9 @@ from dotenv import load_dotenv
 from deep_research.graph import build_compiled_graph
 from deep_research.prompts import normalize_lang
 from deep_research.state import Configuration
+
+# Nodes that output raw JSON — suppress their token stream in the CLI.
+_JSON_NODES = {"plan_research", "generate_similar_questions", "reflect_on_summary"}
 
 
 def _print_graph_step_started(task: dict) -> None:
@@ -33,7 +36,7 @@ def _print_message_token(chunk) -> None:
         isinstance(chunk, tuple)
         and len(chunk) >= 2
         and isinstance(chunk[1], dict)
-        and chunk[1].get("langgraph_node") in ("generate_similar_questions", "reflect_on_summary", "plan_outline")
+        and chunk[1].get("langgraph_node") in _JSON_NODES
     ):
         return
     token = chunk[0] if isinstance(chunk, tuple) and len(chunk) >= 1 else chunk
@@ -49,9 +52,13 @@ def run(topic: str, ctx: Configuration, out_path: Path | None) -> str:
         flush=True,
     )
 
+    input_state: dict = {"topic": topic}
+    if out_path is not None:
+        input_state["output_file_path"] = str(out_path)
+
     last_values: dict | None = None
     stream = graph.stream(
-        {"topic": topic},
+        input_state,
         stream_mode=["tasks", "updates", "messages", "values"],
         context=ctx,
     )
@@ -65,25 +72,21 @@ def run(topic: str, ctx: Configuration, out_path: Path | None) -> str:
             elif mode == "values" and isinstance(data, dict):
                 last_values = data
         elif isinstance(event, dict):
-            # Single-mode streams (e.g. only `updates`) yield a bare dict — no task start events.
             pass
 
     if not last_values:
-        last_values = graph.invoke({"topic": topic}, context=ctx)
+        last_values = graph.invoke(input_state, context=ctx)
 
-    doc = (last_values or {}).get("final_document") or ""
-    if not doc.strip():
-        doc = "Error: empty final_document (did the graph finish write_report?).\n"
+    written_path = (last_values or {}).get("output_file_path") or ""
+    if written_path:
+        print(
+            f"\n\n{'='*60}\nReport written to: {Path(written_path).resolve()}\n{'='*60}\n",
+            flush=True,
+        )
+    else:
+        print("\nWarning: output_file_path not found in final state.", flush=True)
 
-    print("\n\n" + "=" * 60 + "\nFINAL DOCUMENT\n" + "=" * 60 + "\n", flush=True)
-    print(doc, flush=True)
-
-    if out_path is not None:
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(doc, encoding="utf-8")
-        print(f"\nWrote: {out_path.resolve()}", flush=True)
-
-    return doc
+    return written_path
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -95,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
         "-o",
         type=Path,
         default=None,
-        help="Write final Markdown report to this path",
+        help="Write Markdown report to this path (default: report_<topic>.md in current directory)",
     )
     parser.add_argument(
         "--model",
@@ -111,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
         "--max-loops",
         type=int,
         default=int(os.environ.get("DEEP_RESEARCH_MAX_LOOPS", "3")),
-        help="Max extra research rounds after reflection (default: 3)",
+        help="Max extra research rounds per plan after reflection (default: 3)",
     )
     parser.add_argument(
         "--max-results",
@@ -132,10 +135,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Prompt and report language: ja (default) or en (or env DEEP_RESEARCH_LANG)",
     )
     parser.add_argument(
-        "--max-sections",
+        "--max-plans",
         type=int,
-        default=int(os.environ.get("DEEP_RESEARCH_MAX_SECTIONS", "7")),
-        help="Max outline sections for the long-form report (default: 7)",
+        default=int(os.environ.get("DEEP_RESEARCH_MAX_PLANS", "6")),
+        help="Max number of research plan subtopics to generate (default: 6; env DEEP_RESEARCH_MAX_PLANS)",
     )
     _default_fetch = int(os.environ.get("DEEP_RESEARCH_FETCH_PAGES", "8"))
     fetch_grp = parser.add_mutually_exclusive_group()
@@ -183,7 +186,7 @@ def main(argv: list[str] | None = None) -> int:
         max_results_per_query=max(1, args.max_results),
         search_parallel_workers=max(1, min(16, args.search_workers)),
         language=args.lang,
-        max_report_sections=max(4, min(12, args.max_sections)),
+        max_plan_sections=max(3, min(8, args.max_plans)),
         max_fetch_pages=max_fetch,
         fetch_parallel_workers=max(1, min(16, args.fetch_workers)),
     )
