@@ -87,6 +87,34 @@ def _extract_section_heading(section_md: str) -> str:
     return section_md[:80].strip()
 
 
+def _is_relevant(item: dict, topic: str) -> bool:
+    """Return True if the search result has meaningful overlap with the topic.
+
+    Uses bigram matching for CJK text and word matching for Latin text.
+    This catches clearly unrelated pages (ads, missing persons, wrong country, etc.)
+    while keeping a low false-negative rate.
+    """
+    text = (item.get("title", "") + " " + item.get("snippet", ""))
+    topic_clean = topic.strip()
+
+    # Word-level check — works for English / romaji portions
+    words = [w for w in topic_clean.lower().split() if len(w) > 2]
+    if words and any(w in text.lower() for w in words):
+        return True
+
+    # Bigram check — works for Japanese/CJK where words are not space-delimited
+    bigrams = [
+        topic_clean[i : i + 2]
+        for i in range(len(topic_clean) - 1)
+        if not topic_clean[i].isspace() and not topic_clean[i + 1].isspace()
+    ]
+    if bigrams:
+        matches = sum(1 for bg in bigrams if bg in text)
+        return matches >= max(1, len(bigrams) // 4)
+
+    return True  # no criteria to filter on — keep
+
+
 def _derive_output_path(main_topic: str) -> str:
     sanitized = re.sub(r"[^\w\s-]", "", main_topic).strip()
     sanitized = re.sub(r"\s+", "_", sanitized)[:60]
@@ -217,6 +245,7 @@ def plan_research(state: SummaryState, runtime: Runtime[Configuration]) -> dict:
         "research_plans": plans,
         "current_plan_index": 0,
         "written_sections": [],
+        "section_sources": [],
         "output_file_path": output_file_path,
     }
 
@@ -264,6 +293,7 @@ def generate_similar_questions(state: SummaryState, runtime: Runtime[Configurati
     written_sections = state.get("written_sections") or []
     written_headings = [_extract_section_heading(s) for s in written_sections]
 
+    main_topic = state.get("main_topic") or topic
     llm = _llm(cfg)
     sys = SystemMessage(content=P.system_prompt(lang, "generate_similar_questions"))
     human = HumanMessage(
@@ -272,6 +302,7 @@ def generate_similar_questions(state: SummaryState, runtime: Runtime[Configurati
             topic,
             state.get("reflection_text", "") or "",
             written_headings,
+            main_topic=main_topic,
         )
     )
     resp = llm.invoke([sys, human])
@@ -343,6 +374,13 @@ def web_research(state: SummaryState, runtime: Runtime[Configuration]) -> dict:
                 if err:
                     print(f"    (search error for {q!r}: {err})", flush=True)
                 new_items.extend(rows)
+
+    topic = state["topic"]
+    before = len(new_items)
+    new_items = [item for item in new_items if _is_relevant(item, topic)]
+    dropped = before - len(new_items)
+    if dropped:
+        print(f"    (relevance filter dropped {dropped} unrelated result(s))", flush=True)
 
     offset = int(state.get("source_id_offset", 0))
     merged = merge_sources(state.get("sources"), new_items, start_id=offset + 1)
@@ -547,7 +585,6 @@ def write_section(state: SummaryState, runtime: Runtime[Configuration]) -> dict:
     resp = llm.invoke([sys, human])
     section_body = (getattr(resp, "content", str(resp)) or "").strip()
 
-    # Write section body only — references go in one block at the very end (finalize_report)
     path = Path(output_file_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if current_idx == 0:
@@ -559,21 +596,29 @@ def write_section(state: SummaryState, runtime: Runtime[Configuration]) -> dict:
 
     print(f"    written to: {path.resolve()}", flush=True)
 
-    # Accumulate slim source records (no fetched_text) for the final References section
-    all_sources = list(state.get("all_sources") or [])
-    for s in sources:
-        all_sources.append({
+    # Accumulate slim source records for offset tracking and grouped references
+    slim_sources = [
+        {
             "id": s["id"],
             "title": s.get("title", ""),
             "url": s.get("url", ""),
             "snippet": s.get("snippet", ""),
-        })
+        }
+        for s in sources
+    ]
+    all_sources = list(state.get("all_sources") or [])
+    all_sources.extend(slim_sources)
+
+    # Track which sources belong to this section for the grouped References block
+    section_sources = list(state.get("section_sources") or [])
+    section_sources.append({"heading": subtopic, "sources": slim_sources})
 
     written_sections.append(section_body)
     return {
         "written_sections": written_sections,
         "current_plan_index": current_idx + 1,
         "all_sources": all_sources,
+        "section_sources": section_sources,
     }
 
 
@@ -585,30 +630,40 @@ def write_section(state: SummaryState, runtime: Runtime[Configuration]) -> dict:
 def finalize_report(state: SummaryState, runtime: Runtime[Configuration]) -> dict:
     cfg = runtime.context
     lang = cfg.language
-    all_sources = state.get("all_sources") or []
     output_file_path = state.get("output_file_path") or _derive_output_path(
         state.get("main_topic") or state.get("topic", "report")
     )
-    print("\n--- Phase: finalize_report — writing unified References section\n", flush=True)
+    section_sources = state.get("section_sources") or []
+    all_sources = state.get("all_sources") or []
+    print("\n--- Phase: finalize_report — writing grouped References section\n", flush=True)
 
-    ref_lines: list[str] = ["", P.references_heading(lang), ""]
-    for s in all_sources:
-        sid = s["id"]
-        title = (s.get("title") or "Untitled").replace("\n", " ")
-        url = s.get("url", "")
-        snip = (s.get("snippet") or "").replace("\n", " ").strip()
-        if snip:
-            ref_lines.append(
-                f"{sid}. **{title}** — {url}  \n"
-                f"   _{snip[:240]}{'…' if len(snip) > 240 else ''}_\n"
-            )
-        else:
-            ref_lines.append(f"{sid}. **{title}** — {url}\n")
+    top_heading = P.references_heading(lang)  # "## 参考文献" or "## References"
+    lines: list[str] = [f"\n---\n\n{top_heading}\n"]
 
-    refs_block = "\n".join(ref_lines).rstrip() + "\n"
+    for entry in section_sources:
+        heading = entry.get("heading", "")
+        sources = entry.get("sources") or []
+        if not sources:
+            continue
+        lines.append(f"\n### {heading}\n")
+        for s in sources:
+            sid = s["id"]
+            title = (s.get("title") or "Untitled").replace("\n", " ")
+            url = s.get("url", "")
+            snip = (s.get("snippet") or "").replace("\n", " ").strip()
+            short_snip = snip[:200] + ("…" if len(snip) > 200 else "")
+            if short_snip:
+                lines.append(f"{sid}. **{title}** — {url}  \n   _{short_snip}_\n")
+            else:
+                lines.append(f"{sid}. **{title}** — {url}\n")
+
     path = Path(output_file_path)
     with path.open("a", encoding="utf-8") as f:
-        f.write(f"\n{refs_block}")
+        f.write("\n".join(lines))
 
-    print(f"    references ({len(all_sources)} sources) written to: {path.resolve()}", flush=True)
+    print(
+        f"    grouped references ({len(all_sources)} sources, {len(section_sources)} sections) "
+        f"written to: {path.resolve()}\n",
+        flush=True,
+    )
     return {}

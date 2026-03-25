@@ -68,6 +68,9 @@ _SYSTEM: dict[Lang, dict[str, str]] = {
             '形式: {"plans": ["サブトピック1", "サブトピック2", ...]}\n'
             "メインテーマを 5〜8 個の焦点が絞られた異なるサブトピックに分解し、全体として包括的な調査ができるようにしてください。"
             "各サブトピックは独立して調査できる、具体的な問いや切り口にしてください。"
+            "【必須】各サブトピックの文字列には、必ずメインテーマの固有名詞・主キーワードをそのまま含めてください。"
+            "サブトピックが単独でウェブ検索クエリとして使われるため、主キーワードが欠けると無関係な結果しか得られません。"
+            "例: メインテーマが「ABC株式会社について」の場合、サブトピックは「デジタルサービスの種類」ではなく「ABC株式会社が提供するデジタルサービスの種類」と書く。"
             "サブトピック同士は重複させないでください。各文字列は日本語で書いてください。JSON 以外の文章は書かないでください。"
         ),
         "generate_similar_questions": (
@@ -78,10 +81,12 @@ _SYSTEM: dict[Lang, dict[str, str]] = {
             "言語はユーザーの質問と揃えてください。JSON 以外の文章は書かないでください。"
         ),
         "summarize_sources": (
+            "【重要】出力は必ず日本語で書いてください。中国語・英語など他の言語は絶対に使用しないでください。\n\n"
             "あなたはリサーチアナリストです。与えられた情報源に基づき、事実を高密度に要約してください。"
             "文中の引用は [1]、[2] のように、下に示すソース id のみを使ってください。id を捏造しないでください。"
             "情報が不足している場合はその旨を書いてください。Markdown の段落と ### 見出しを使ってください。"
             "現在のサブトピックに新しく固有の内容に集中し、すでに書き済みのセクションの内容は繰り返さないでください。"
+            "対象国・地域（日本）に関係のない情報源は完全に無視してください。"
             "本文は日本語で書いてください。"
         ),
         "reflect_on_summary": (
@@ -91,6 +96,7 @@ _SYSTEM: dict[Lang, dict[str, str]] = {
             "reason は日本語で書いてください。"
         ),
         "write_section": (
+            "【重要】出力は必ず日本語で書いてください。中国語・英語など他の言語は絶対に使用しないでください。\n\n"
             "調査レポートの「1つのセクション」だけを Markdown で書きます。要件:\n"
             "- 1 行目は必ず次の形式: ## （指定されたサブトピックタイトルをそのまま使用）\n"
             "- その後、十分な量の段落で詳述する（深さを重視）\n"
@@ -101,6 +107,7 @@ _SYSTEM: dict[Lang, dict[str, str]] = {
             "- 「すでに書いたセクション」が提示されている場合は、その内容の繰り返し・再説明をしない。"
             "このサブトピックに固有の新しい内容だけを書く\n"
             "- 情報源が矛盾・薄弱な点は不確実性として明記\n"
+            "- 対象国・地域（日本）に関係のない情報源は完全に無視すること\n"
             "- 本文は日本語で書く"
         ),
     },
@@ -124,13 +131,17 @@ def plan_research_human(lang: str | None, main_topic: str, max_plans: int) -> st
     if normalize_lang(lang) == "ja":
         return (
             f"メインテーマ:\n{main_topic}\n\n"
-            f"このテーマを {max_plans} 個以内の非重複サブトピックに分解してください。"
-            "各サブトピックは独立して調査できる具体的な切り口にしてください。"
+            f"このテーマを {max_plans} 個以内の非重複サブトピックに分解してください。\n"
+            "各サブトピックは独立して調査できる具体的な切り口にしてください。\n"
+            f"【重要】各サブトピックの文字列には必ず「{main_topic}」のキーワードを含めてください。"
+            "サブトピックはそのままウェブ検索クエリとして使用されるため、主キーワードが入っていないと無関係な結果になります。"
         )
     return (
         f"Main research topic:\n{main_topic}\n\n"
         f"Break this into up to {max_plans} non-overlapping subtopics. "
-        "Each should be a specific angle that can be researched independently."
+        "Each should be a specific angle that can be researched independently. "
+        f"IMPORTANT: every subtopic string must include the main entity/keyword from the topic "
+        f"('{main_topic}'), since each subtopic is used directly as a web search query."
     )
 
 
@@ -139,6 +150,7 @@ def generate_similar_questions_human(
     topic: str,
     reflection_text: str,
     written_headings: list[str] | None = None,
+    main_topic: str | None = None,
 ) -> str:
     headings = written_headings or []
     if normalize_lang(lang) == "ja":
@@ -146,8 +158,9 @@ def generate_similar_questions_human(
         headings_block = (
             "（なし）" if not headings else "\n".join(f"- {h}" for h in headings)
         )
+        anchor = f"\nメインテーマ（検索クエリに必ず含めること）: {main_topic}" if main_topic else ""
         return (
-            f"現在の調査サブトピック:\n{topic}\n\n"
+            f"現在の調査サブトピック:\n{topic}{anchor}\n\n"
             "前回のリフレクションで指摘された不足点:\n"
             f"{reflection_text or none_}\n\n"
             "すでに書き済みのセクション見出し（重複を避ける）:\n"
@@ -156,8 +169,9 @@ def generate_similar_questions_human(
     headings_block = (
         "(none)" if not headings else "\n".join(f"- {h}" for h in headings)
     )
+    anchor = f"\nMain topic (must appear in the search query): {main_topic}" if main_topic else ""
     return (
-        f"Current research subtopic:\n{topic}\n\n"
+        f"Current research subtopic:\n{topic}{anchor}\n\n"
         "Gaps from prior reflection:\n"
         f"{reflection_text or '(none)'}\n\n"
         "Already-written section headings (avoid overlapping these):\n"
@@ -177,6 +191,7 @@ def summarize_sources_human(
             "（なし）" if not headings else "\n".join(f"- {h}" for h in headings)
         )
         return (
+            "対象国・地域: 日本（日本以外の国・地域の情報源は無視してください）\n\n"
             f"現在のサブトピック:\n{topic}\n\n"
             "すでに書き済みのセクション見出し（これらの内容は繰り返さない）:\n"
             f"{headings_block}\n\n"
@@ -227,6 +242,7 @@ def write_section_human(
             else "（まだ書き済みのセクションはありません）"
         )
         return (
+            "対象国・地域: 日本（日本以外の国・地域の情報源は無視してください）\n\n"
             f"メインテーマ（全体の文脈）:\n{main_topic}\n\n"
             f"現在のサブトピック（この節の ## 見出しとして使用）:\n{subtopic}\n\n"
             f"作業用要約（このサブトピックの調査結果）:\n{working_summary}\n\n"

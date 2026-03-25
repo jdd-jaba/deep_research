@@ -54,6 +54,9 @@ class SummaryState(TypedDict, total=False):
 
     # Global source accumulator — slim records (id, title, url, snippet) across all plans
     all_sources: list[dict]
+    # Per-section source accumulator for grouped References block at the end of the report.
+    # Each entry: {"heading": str, "sources": list[dict]}
+    section_sources: list[dict]
     # Number of sources collected before the current plan; used to offset source IDs
     source_id_offset: int
 
