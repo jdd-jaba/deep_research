@@ -11,15 +11,35 @@ from deep_research.state import Configuration, SummaryState
 
 
 def fetch_pages(state: SummaryState, runtime: Runtime[Configuration]) -> dict:
+    """Fetch full HTML page content for up to N sources from search results.
+    
+    Downloads complete web pages (not just snippets) using HTTP, extracts main text
+    content with trafilatura, and adds it to source records. Supports parallel fetching
+    for speed. Skips already-fetched pages and respects fetch page limits.
+    
+    Args:
+        state: Graph state with sources list from search_web
+        runtime: Runtime context with fetch configuration (max pages, timeout, workers)
+    
+    Returns:
+        dict: Updated state with:
+            - sources: Same list but with fetched_text or fetch_error added to each record
+    
+    Notes:
+        - Only fetches up to max_fetch_pages (default 12, 0=disabled)
+        - Respects timeouts and byte limits to prevent hanging
+        - Extracts clean text from HTML, removing scripts/styles
+        - Marks page_fetch_done=True to avoid re-fetching
+    """
     cfg = runtime.context
     sources = state.get("sources") or []
     max_n = max(0, cfg.max_fetch_pages)
     if max_n == 0 or not sources:
-        print("\n--- Phase: fetch_pages — skipped (max_fetch_pages=0 or no sources)\n", flush=True)
+        print("\n--- Phase: fetch_page_content — skipped (max_fetch_pages=0 or no sources)\n", flush=True)
         return {}
 
     workers = max(1, min(cfg.fetch_parallel_workers, max_n))
-    print("\n--- Phase: fetch_pages\n", flush=True)
+    print("\n--- Phase: fetch_page_content\n", flush=True)
 
     out: list[dict | None] = [None] * len(sources)
     jobs: list[tuple[int, dict, int]] = []  # (index, row copy, fetch_num 1..max_n)

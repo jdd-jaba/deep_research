@@ -24,7 +24,7 @@ from deep_research.state import Configuration, SummaryState, SummaryStateInput, 
 def route_research(
     state: SummaryState,
 ) -> Literal["generate_similar_questions", "write_section"]:
-    """After reflect_on_summary: loop for more research or move on to writing."""
+    """After evaluate_coverage: loop for more research or move on to writing."""
     runtime = get_runtime(Configuration)
     ctx = runtime.context
     max_loops = ctx.max_loops if ctx is not None else 3
@@ -60,21 +60,21 @@ def build_compiled_graph():
     builder.add_node("write_section", write_section)
     builder.add_node("finalize_report", finalize_report)
 
-    # Initial planning
+    # Initial planning: create subtopics
     builder.add_edge(START, "plan_research")
     builder.add_edge("plan_research", "advance_plan")
 
-    # Per-plan research loop — start with direct web search using the plan topic
+    # Per-plan research loop: search web → fetch content → summarize → evaluate
     builder.add_edge("advance_plan", "web_research")
     builder.add_edge("generate_similar_questions", "web_research")
     builder.add_edge("web_research", "fetch_pages")
     builder.add_edge("fetch_pages", "summarize_sources")
     builder.add_edge("summarize_sources", "reflect_on_summary")
 
-    # After reflection: more research or write this section
+    # After evaluation: more research (optional loop) or write this section
     builder.add_conditional_edges("reflect_on_summary", route_research)
 
-    # After writing: next plan or append unified References and finish
+    # After writing: next subtopic or append unified References and finish
     builder.add_conditional_edges("write_section", route_plans)
     builder.add_edge("finalize_report", END)
 

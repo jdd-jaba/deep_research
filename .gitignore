@@ -1,7 +1,31 @@
+# Virtual environments
 .venv/
+venv/
+ENV/
+
+# Python cache
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
+
+# Package distribution
 *.egg-info/
 dist/
 build/
+
+# Environment variables
 .env
+
+# Generated reports
+report_*.md
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

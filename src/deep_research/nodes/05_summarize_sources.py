@@ -6,11 +6,31 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.runtime import Runtime
 
 from deep_research import prompts as P
-from deep_research.nodes.utils import _extract_section_heading, _llm
+from deep_research.helpers import _extract_section_heading, _llm
 from deep_research.state import Configuration, SummaryState
 
 
 def summarize_sources(state: SummaryState, runtime: Runtime[Configuration]) -> dict:
+    """Synthesize collected sources into a dense factual working summary.
+    
+    Uses an LLM to analyze all sources (snippets + fetched pages) and create a
+    structured summary focused on the current subtopic. Avoids repeating content
+    from already-written sections. This summary feeds into the final section writing.
+    
+    Args:
+        state: Graph state with sources and topic
+        runtime: Runtime context with model and language configuration
+    
+    Returns:
+        dict: Updated state with:
+            - working_summary: Dense markdown summary with ### headings and [n] citations
+    
+    Notes:
+        - Citations use source IDs: [1], [2], etc.
+        - Avoids content overlap with written_sections
+        - Focuses on NEW information specific to current subtopic
+        - Includes uncertainty flags where sources conflict
+    """
     cfg = runtime.context
     lang = cfg.language
     print("\n--- Phase: summarize_sources — synthesizing from collected sources\n", flush=True)

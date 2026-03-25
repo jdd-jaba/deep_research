@@ -6,7 +6,7 @@
 
 ## アーキテクチャ
 
-内部の流れはシンプルです。まずテーマが **5〜8 個のサブトピック**に分かれます（`plan_research`）。サブトピックごとに Web 検索を回し、モデルがまだ足りないと判断したら、**一段シャープなフォローアップクエリを 1 本**立てて再検索し、満足するまで繰り返します。各サブトピックの節ができあがるたびに **その時点でディスクへ書き出し**（`write_section`）してから次へ進むため、ノート PC でも文脈を抑えつつ、最後に **長い `.md` ファイル**と末尾の引用一覧が手に入ります。
+内部の流れはシンプルです。まずテーマが **5〜8 個のサブトピック**に分かれます（`create_subtopics`）。サブトピックごとに Web 検索を回し、モデルがまだ足りないと判断したら、**一段シャープなフォローアップクエリを 1 本**立てて再検索し、満足するまで繰り返します。各サブトピックの節ができあがるたびに **その時点でディスクへ書き出し**（`write_section`）してから次へ進むため、ノート PC でも文脈を抑えつつ、最後に **長い `.md` ファイル**と末尾の引用一覧が手に入ります。
 
 ```mermaid
 sequenceDiagram
@@ -58,21 +58,21 @@ sequenceDiagram
 
 実行用のグラフは `src/deep_research/graph.py` で組み立て、状態の型は `src/deep_research/state.py` の `SummaryState` です。各 **ノード** は Python の関数で、現在の状態を読み、更新分だけを辞書として返します。**エッジ**でノードを直列につなぎ、**条件付きエッジ**が「追加で調べるループ」と「次のサブトピックへ進むループ」を実現しています。
 
-| ノード                         | 役割                                                                                                                                                                                              |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `plan_research`                | LLM を一度呼び、ユーザーのテーマを `research_plans`（サブトピックのリスト）に分割する。出力ファイルのパスや蓄積用フィールドもここで初期化する。                                                   |
-| `advance_plan`                 | いま扱うサブトピックを `topic` にセットし、計画単位のフィールド（`sources`、`working_summary`、`need_more_research`、`loop_count` など）をリセットする。引用番号が全体で連なるよう `source_id_offset` も設定する。 |
-| `web_research`                 | `search_queries` があればそれで、なければ現在のサブトピック文字列で DuckDuckGo を検索し、ヒットを関連度フィルタ付きで `sources` にマージする。                                                     |
-| `fetch_pages`                  | 最大 `max_fetch_pages` 件まで HTML を取得し、各ソース行に抜粋テキストを付ける（任意の処理）。                                                                                                      |
-| `summarize_sources`            | スニペットと取得済み抜粋から、LLM が現在のサブトピック向けの **作業用要約**（`working_summary`）をまとめる。                                                                                       |
-| `reflect_on_summary`           | LLM が JSON で返す。**知識ギャップがあるか**（`need_more_research`）、短い理由（`reflection_text`）、更新後の `loop_count`（`--max-loops` および設定の `max_loops` で上限）。                      |
-| `generate_similar_questions`   | ルーティングでここに来たとき、LLM がフォローアップ用の `search_queries` を埋め、そのあと再び `web_research` へ進む。                                                                              |
-| `write_section`                | LLM が節本文だけの Markdown を書き、ノード側でレポートファイルに追記する。`section_sources` と `all_sources` を更新し、`current_plan_index` を進める。                                           |
-| `finalize_report`              | ファイル末尾に、まとめて **参考文献**ブロックを追記する。                                                                                                                                         |
+| ノード                                    | 役割                                                                                                                                                                                              |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `create_subtopics`                        | LLM を一度呼び、ユーザーのテーマを `research_plans`（サブトピックのリスト）に分割する。出力ファイルのパスや蓄積用フィールドもここで初期化する。                                                   |
+| `load_next_subtopic`                      | いま扱うサブトピックを `topic` にセットし、計画単位のフィールド（`sources`、`working_summary`、`need_more_research`、`loop_count` など）をリセットする。引用番号が全体で連なるよう `source_id_offset` も設定する。 |
+| `search_web`                              | `search_queries` があればそれで、なければ現在のサブトピック文字列で DuckDuckGo を検索し、ヒットを関連度フィルタ付きで `sources` にマージする。                                                     |
+| `fetch_page_content`                      | 最大設定件数まで HTML を取得し、各ソース行に抜粋テキストを付ける（任意の処理）。                                                                                                                  |
+| `summarize_sources`                       | スニペットと取得済み抜粋から、LLM が現在のサブトピック向けの **作業用要約**（`working_summary`）をまとめる。                                                                                       |
+| `evaluate_coverage`                       | LLM が JSON で返す。**知識ギャップがあるか**（`need_more_research`）、短い理由（`reflection_text`）、更新後の `loop_count`（`--max-loops` および設定の `max_loops` で上限）。                      |
+| `generate_similar_question_if_necessary`  | ルーティングでここに来たとき、LLM がフォローアップ用の `search_queries` を埋め、そのあと再び `search_web` へ進む。                                                                                |
+| `write_section`                           | LLM が節本文だけの Markdown を書き、ノード側でレポートファイルに追記する。`section_sources` と `all_sources` を更新し、`current_plan_index` を進める。                                           |
+| `finalize_report`                         | ファイル末尾に、まとめて **参考文献**ブロックを追記する。                                                                                                                                         |
 
-**固定エッジ:** `START` → `plan_research` → `advance_plan` → `web_research` → `fetch_pages` → `summarize_sources` → `reflect_on_summary`。ほかに `generate_similar_questions` → `web_research`、`finalize_report` → `END`。
+**固定エッジ:** `START` → `create_subtopics` → `load_next_subtopic` → `search_web` → `fetch_page_content` → `summarize_sources` → `evaluate_coverage`。ほかに `generate_similar_question_if_necessary` → `search_web`、`finalize_report` → `END`。
 
-**条件付きエッジ:** `reflect_on_summary` のあと、`need_more_research` が真で、かつ `loop_count` が `max_loops` に達していなければ `generate_similar_questions`、それ以外は `write_section`。`write_section` のあと、`research_plans` にまだサブトピックが残っていれば `advance_plan`、なければ `finalize_report`。
+**条件付きエッジ:** `evaluate_coverage` のあと、`need_more_research` が真で、かつ `loop_count` が `max_loops` に達していなければ `generate_similar_question_if_necessary`、それ以外は `write_section`。`write_section` のあと、`research_plans` にまだサブトピックが残っていれば `load_next_subtopic`、なければ `finalize_report`。
 
 ---
 

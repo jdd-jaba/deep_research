@@ -7,11 +7,31 @@ from pathlib import Path
 from langgraph.runtime import Runtime
 
 from deep_research import prompts as P
-from deep_research.nodes.utils import _derive_output_path
+from deep_research.helpers import _derive_output_path
 from deep_research.state import Configuration, SummaryState
 
 
 def finalize_report(state: SummaryState, runtime: Runtime[Configuration]) -> dict:
+    """Append a unified References section at the bottom of the report.
+    
+    This is the final node in the graph. It collects all sources from all sections,
+    formats them as a numbered list with titles, URLs, and snippets, and appends
+    them to the markdown file. Each source is shown once with its citation ID.
+    
+    Args:
+        state: Graph state with section_sources and all_sources
+        runtime: Runtime context with language configuration
+    
+    Returns:
+        dict: Empty dict (no state changes needed, just writes to file)
+    
+    Notes:
+        - Creates "## References" or "## 参考文献" heading
+        - Sources are listed by ID: "1. **Title** — URL\\n   _snippet_"
+        - Grouped by section for organization
+        - Snippets truncated to 200 chars
+        - File path from output_file_path state variable
+    """
     cfg = runtime.context
     lang = cfg.language
     output_file_path = state.get("output_file_path") or _derive_output_path(

@@ -16,8 +16,8 @@ class Configuration:
     max_results_per_query: int = 5
     search_parallel_workers: int = 4  # DuckDuckGo queries in parallel (1 = sequential)
     language: str = "ja"  # prompt locale: "ja" (default) or "en"
-    max_plan_sections: int = 6  # number of subtopics plan_research generates (4–8)
-    max_fetch_pages: int = 12  # full-page fetches after search (0 = off)
+    max_plan_sections: int = 6  # number of subtopics create_subtopics generates (4–8)
+    max_fetch_pages: int = 12  # full-page content fetches after search (0 = off)
     fetch_parallel_workers: int = 4  # concurrent HTTP fetches (1 = sequential)
     fetch_timeout: float = 20.0
     max_fetch_response_bytes: int = 2_000_000
@@ -39,10 +39,10 @@ class SummaryState(TypedDict, total=False):
 
     # Original user topic — constant throughout the run
     main_topic: str
-    # Current subtopic — set by advance_plan before each research loop
+    # Current subtopic — set by load_next_subtopic before each research loop
     topic: str
 
-    # Research plan (list of subtopic strings, produced by plan_research)
+    # Research plan (list of subtopic strings, produced by create_subtopics)
     research_plans: list[str]
     current_plan_index: int  # index into research_plans; incremented by write_section
 
@@ -60,7 +60,7 @@ class SummaryState(TypedDict, total=False):
     # Number of sources collected before the current plan; used to offset source IDs
     source_id_offset: int
 
-    # Per-plan state — reset by advance_plan on each iteration
+    # Per-plan state — reset by load_next_subtopic on each iteration
     search_queries: list[str]
     sources: list[dict]
     working_summary: str

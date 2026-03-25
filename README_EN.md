@@ -6,7 +6,7 @@
 
 ## Architecture
 
-Under the hood it is simple to follow. First, your topic is split into **5–8 subtopics** (`plan_research`). For each one, the graph runs a web search; if the model still sees knowledge gaps, it asks **one** sharper follow-up query and searches again until it is satisfied. Each finished section is **written straight to disk** (`write_section`) before the next subtopic starts — so memory stays small on a laptop, and you still get a **long-form `.md` file** with citations at the end.
+Under the hood it is simple to follow. First, your topic is split into **5–8 subtopics** (`create_subtopics`). For each one, the graph runs a web search; if the model still sees knowledge gaps, it asks **one** sharper follow-up query and searches again until it is satisfied. Each finished section is **written straight to disk** (`write_section`) before the next subtopic starts — so memory stays small on a laptop, and you still get a **long-form `.md` file** with citations at the end.
 
 ```mermaid
 sequenceDiagram
@@ -58,17 +58,17 @@ sequenceDiagram
 
 The runnable graph is built in `src/deep_research/graph.py` on top of `SummaryState` in `src/deep_research/state.py`. Each **node** is a Python function that reads state and returns a patch dict; **edges** chain nodes, and **conditional edges** implement the research loop and the multi-subtopic loop.
 
-| Node                         | Role                                                                                                                                                                                              |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `plan_research`              | Calls the LLM once to split the user topic into `research_plans` (subtopics), initializes file path and accumulators.                                                                             |
-| `advance_plan`               | Sets the current subtopic (`topic`), resets per-plan fields (`sources`, `working_summary`, `need_more_research`, `loop_count`, …), and sets `source_id_offset` so citation IDs stay global.       |
-| `web_research`               | Runs DuckDuckGo for `search_queries` if present, otherwise for the current subtopic string; merges hits into `sources` with relevance filtering.                                                  |
-| `fetch_pages`                | Optionally fetches full HTML for up to `max_fetch_pages` URLs and attaches excerpt text to each source row.                                                                                       |
-| `summarize_sources`          | LLM synthesizes a **working summary** from snippets and fetched excerpts for the current subtopic.                                                                                                |
-| `reflect_on_summary`         | LLM returns JSON: whether there is a **knowledge gap** (`need_more_research`), a short reason (`reflection_text`), and an updated `loop_count` (capped by `--max-loops` / `max_loops` in config). |
-| `generate_similar_questions` | When the router sends you here, the LLM fills `search_queries` for a sharper follow-up round (then `web_research` runs again).                                                                    |
-| `write_section`              | LLM writes one Markdown section (no reference list); the node appends it to the report file, records `section_sources`, extends `all_sources`, and increments `current_plan_index`.               |
-| `finalize_report`            | Appends a single grouped **References** block at the end of the file.                                                                                                                             |
+| Node                                     | Role                                                                                                                                                                                              |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `create_subtopics`                       | Calls the LLM once to split the user topic into `research_plans` (subtopics), initializes file path and accumulators.                                                                             |
+| `load_next_subtopic`                     | Sets the current subtopic (`topic`), resets per-plan fields (`sources`, `working_summary`, `need_more_research`, `loop_count`, …), and sets `source_id_offset` so citation IDs stay global.       |
+| `search_web`                             | Runs DuckDuckGo for `search_queries` if present, otherwise for the current subtopic string; merges hits into `sources` with relevance filtering.                                                  |
+| `fetch_page_content`                     | Optionally fetches full HTML for configured max URLs and attaches excerpt text to each source row.                                                                                                |
+| `summarize_sources`                      | LLM synthesizes a **working summary** from snippets and fetched excerpts for the current subtopic.                                                                                                |
+| `evaluate_coverage`                      | LLM returns JSON: whether there is a **knowledge gap** (`need_more_research`), a short reason (`reflection_text`), and an updated `loop_count` (capped by `--max-loops` / `max_loops` in config). |
+| `generate_similar_question_if_necessary` | When the router sends you here, the LLM fills `search_queries` for a sharper follow-up round (then `search_web` runs again).                                                                      |
+| `write_section`                          | LLM writes one Markdown section (no reference list); the node appends it to the report file, records `section_sources`, extends `all_sources`, and increments `current_plan_index`.               |
+| `finalize_report`                        | Appends a single grouped **References** block at the end of the file.                                                                                                                             |
 
 ---
 

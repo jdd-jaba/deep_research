@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.runtime import Runtime
 
 from deep_research import prompts as P
-from deep_research.nodes.utils import (
+from deep_research.helpers import (
     _WRITE_SECTION_PRIOR_MAX_CHARS,
     _derive_output_path,
     _llm,
@@ -19,6 +19,31 @@ from deep_research.state import Configuration, SummaryState
 
 
 def write_section(state: SummaryState, runtime: Runtime[Configuration]) -> dict:
+    """Write one comprehensive markdown section and immediately flush to disk.
+    
+    Uses an LLM to transform the working summary into a well-structured section
+    with ## heading, ### subheadings, detailed paragraphs, and [n] citations.
+    Citations are isolated per-section (prior section IDs are stripped to prevent
+    cross-section leaking). Writes directly to the output .md file.
+    
+    Args:
+        state: Graph state with topic, working_summary, sources, and written_sections
+        runtime: Runtime context with model and language configuration
+    
+    Returns:
+        dict: Updated state with:
+            - written_sections: List appended with new section markdown
+            - current_plan_index: Incremented to move to next plan
+            - all_sources: Slim source records accumulated for final References
+            - section_sources: Tracks which sources belong to which section heading
+    
+    Notes:
+        - First section creates file with # main_topic title
+        - Subsequent sections are appended
+        - Prior sections are truncated to 30k chars to fit in context
+        - Citations stripped from prior sections to avoid ID conflicts
+        - Each section gets unique source IDs continuing from previous plans
+    """
     cfg = runtime.context
     lang = cfg.language
     subtopic = state["topic"]

@@ -93,8 +93,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("topic", help="Research question or topic")
     parser.add_argument(
         "--model",
-        default=os.environ.get("OLLAMA_MODEL", "deepseek-r1:8b"),
-        help="Ollama model name (default: env OLLAMA_MODEL or deepseek-r1:8b)",
+        default=os.environ.get("OLLAMA_MODEL", "llama3.2"),
+        help="Ollama model name (default: env OLLAMA_MODEL or llama3.2)",
     )
     parser.add_argument(
         "--max-loops",
@@ -152,7 +152,7 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=int(os.environ.get("DEEP_RESEARCH_FETCH_WORKERS", "4")),
         help=(
-            "Parallel HTTP fetches in fetch_pages (default: 4; 1=sequential; "
+            "Parallel HTTP fetches when fetching page content (default: 4; 1=sequential; "
             "max 16; env DEEP_RESEARCH_FETCH_WORKERS)"
         ),
     )

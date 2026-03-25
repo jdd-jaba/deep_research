@@ -7,8 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from ddgs import DDGS
 from langgraph.runtime import Runtime
 
-from deep_research.nodes.sources import merge_sources
-from deep_research.nodes.utils import _is_relevant
+from deep_research.helpers import _is_relevant, merge_sources
 from deep_research.state import Configuration, SummaryState
 
 
@@ -32,10 +31,30 @@ def _ddg_search_one_query(query: str, max_results: int) -> tuple[list[dict], str
 
 
 def web_research(state: SummaryState, runtime: Runtime[Configuration]) -> dict:
+    """Execute DuckDuckGo searches for the current topic/queries in parallel.
+    
+    Performs web searches using search_queries (or topic as fallback), filters results
+    for relevance, deduplicates URLs, and merges with existing sources. Supports
+    parallel execution for faster results.
+    
+    Args:
+        state: Graph state with topic and optionally search_queries
+        runtime: Runtime context with search configuration (workers, max_results)
+    
+    Returns:
+        dict: Updated state with:
+            - sources: Merged and deduplicated list of sources with metadata
+            - last_search_preview: Text preview of top 10 URLs for logging
+    
+    Notes:
+        - Uses bigram matching for CJK text and word matching for Latin text
+        - Filters out clearly unrelated results (ads, wrong topics)
+        - Maintains source ID continuity via source_id_offset
+    """
     cfg = runtime.context
     queries = state.get("search_queries") or [state["topic"]]
     workers = max(1, min(cfg.search_parallel_workers, len(queries)))
-    print("\n--- Phase: web_research\n", flush=True)
+    print("\n--- Phase: search_web\n", flush=True)
     for q in queries:
         print(f"    searching: {q[:100]!r}", flush=True)
 

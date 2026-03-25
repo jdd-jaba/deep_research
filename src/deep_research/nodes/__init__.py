@@ -1,23 +1,37 @@
 """LangGraph node implementations."""
 
-from deep_research.nodes.advance_plan import advance_plan
-from deep_research.nodes.fetch_pages import fetch_pages
-from deep_research.nodes.finalize_report import finalize_report
-from deep_research.nodes.generate_questions import generate_similar_questions
-from deep_research.nodes.plan_research import plan_research
-from deep_research.nodes.reflect_on_summary import reflect_on_summary
-from deep_research.nodes.summarize_sources import summarize_sources
-from deep_research.nodes.web_research import web_research
-from deep_research.nodes.write_section import write_section
+from importlib import import_module
+
+# Import nodes from numbered files
+_module_01 = import_module('.01_create_subtopics', 'deep_research.nodes')
+_module_02 = import_module('.02_load_next_subtopic', 'deep_research.nodes')
+_module_03 = import_module('.03_search_web', 'deep_research.nodes')
+_module_04 = import_module('.04_fetch_page_content', 'deep_research.nodes')
+_module_05 = import_module('.05_summarize_sources', 'deep_research.nodes')
+_module_06 = import_module('.06_evaluate_coverage', 'deep_research.nodes')
+_module_07 = import_module('.07_generate_similar_question_if_necessary', 'deep_research.nodes')
+_module_08 = import_module('.08_write_section', 'deep_research.nodes')
+_module_09 = import_module('.09_finalize_report', 'deep_research.nodes')
+
+# Extract functions (keeping original function names for compatibility)
+plan_research = _module_01.plan_research
+advance_plan = _module_02.advance_plan
+web_research = _module_03.web_research
+fetch_pages = _module_04.fetch_pages
+summarize_sources = _module_05.summarize_sources
+reflect_on_summary = _module_06.reflect_on_summary
+generate_similar_questions = _module_07.generate_similar_questions
+write_section = _module_08.write_section
+finalize_report = _module_09.finalize_report
 
 __all__ = [
-    "advance_plan",
-    "fetch_pages",
-    "finalize_report",
-    "generate_similar_questions",
     "plan_research",
-    "reflect_on_summary",
-    "summarize_sources",
+    "advance_plan",
     "web_research",
+    "fetch_pages",
+    "summarize_sources",
+    "reflect_on_summary",
+    "generate_similar_questions",
     "write_section",
+    "finalize_report",
 ]
