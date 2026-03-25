@@ -1,14 +1,12 @@
-# deep_research
+# DEEP RESEARCH
 
-> [English README](README_EN.md)
-
-ローカル動作の **ディープリサーチ CLI**。**LangGraph** でグラフを構成し、**Ollama** を LLM として使用、**DuckDuckGo**（`ddgs`）で検索、**httpx + trafilatura** でページ本文を取得。
-
-トピックをまず **5〜8 個のサブトピックに分解**し（`plan_research`）、サブトピックごとにまず直接 Web 検索を実行します。情報が不足していると判断された場合は **1 件のフォローアップクエリ**を生成して再検索し、十分な情報が集まるまでループします。その後そのサブトピックの節を **Markdown ファイルに即時書き出し**（`write_section`）してから次のサブトピックに進みます。ローカルの文脈ウィンドウを節約しながら **長文レポート**を生成できます。
+**ローカルでディープリサーチを、コマンド一つで。** 調査したいテーマを渡すと、この CLI が計画を立て、Web を検索し、実ページを読み、得た内容をどこでも開ける **読みやすい Markdown レポート**にまとめます。処理はすべて手元のマシン上で完結します。推論は **Ollama**、ワークフローは **LangGraph**、検索は **DuckDuckGo**（`ddgs`）、記事本文の取得は **httpx** と **trafilatura** が担当します。
 
 ---
 
-## グラフの流れ
+## アーキテクチャ
+
+内部の流れはシンプルです。まずテーマが **5〜8 個のサブトピック**に分かれます（`plan_research`）。サブトピックごとに Web 検索を回し、モデルがまだ足りないと判断したら、**一段シャープなフォローアップクエリを 1 本**立てて再検索し、満足するまで繰り返します。各サブトピックの節ができあがるたびに **その時点でディスクへ書き出し**（`write_section`）してから次へ進むため、ノート PC でも文脈を抑えつつ、最後に **長い `.md` ファイル**と末尾の引用一覧が手に入ります。
 
 ```mermaid
 sequenceDiagram
@@ -17,59 +15,117 @@ sequenceDiagram
     participant LLM as Ollama LLM
     participant DDG as DuckDuckGo
     participant Web as Web Pages
-    participant File as report_*.md
+    participant File as report md file
 
-    User->>Graph: topic（調査テーマ）
+    User->>Graph: topic
 
-    Graph->>LLM: plan_research
-    Note right of LLM: テーマを N 個のサブトピックに分解
-    LLM-->>Graph: ["サブトピック1", "サブトピック2", ...]
+    Graph->>LLM: plan research node
+    Note right of LLM: Break topic into N subtopics
+    LLM-->>Graph: JSON list of subtopics
 
-    loop サブトピックごとに繰り返し（N 回）
-        Graph->>Graph: advance_plan
-        Note right of Graph: サブトピックをセット・状態リセット・ソースID オフセット設定
+    loop For each subtopic N times
+        Graph->>Graph: advance plan node
+        Note right of Graph: Set subtopic reset state source ID offset
 
-        Graph->>DDG: web_research（プラン名をクエリとして検索）
-        DDG-->>Graph: URL + スニペット（グローバル連番 ID）
+        Graph->>DDG: web research query
+        DDG-->>Graph: URLs and snippets global IDs
 
-        Graph->>Web: fetch_pages（並列）
-        Web-->>Graph: ページ本文テキスト
+        Graph->>Web: fetch pages parallel
+        Web-->>Graph: page text
 
-        Graph->>LLM: summarize_sources
-        LLM-->>Graph: 作業用要約
+        Graph->>LLM: summarize sources
+        LLM-->>Graph: working summary
 
-        Graph->>LLM: reflect_on_summary
-        LLM-->>Graph: need_more_research: true / false
+        Graph->>LLM: reflect on summary
+        LLM-->>Graph: knowledge gap yes or no
 
-        loop need_more_research = true の場合のみ
-            Graph->>LLM: generate_similar_questions
-            LLM-->>Graph: フォローアップクエリ 1 件
+        Note over Graph,Web: If knowledge gap generate one similar question then web research fetch pages summarize sources and reflect again repeat until gap is closed
 
-            Graph->>DDG: web_research（並列）
-            DDG-->>Graph: URL + スニペット
+        Graph->>LLM: write section
+        LLM-->>Graph: Markdown section body no refs
 
-            Graph->>Web: fetch_pages（並列）
-            Web-->>Graph: ページ本文テキスト
-
-            Graph->>LLM: summarize_sources
-            LLM-->>Graph: 作業用要約
-
-            Graph->>LLM: reflect_on_summary
-            LLM-->>Graph: need_more_research: true / false
-        end
-
-        Graph->>LLM: write_section
-        LLM-->>Graph: ## サブトピック の本文（参考文献なし）
-
-        Graph->>File: セクション本文をディスクに即時書き出し
-        Note right of File: ソース情報を all_sources に蓄積
+        Graph->>File: flush section to disk
+        Note right of File: store sources per section and global list
     end
 
-    Graph->>File: finalize_report
-    Note right of File: ## 参考文献 を末尾に一括追記
+    Graph->>File: finalize report
+    Note right of File: horizontal rule then References flat list
 
-    Graph-->>User: output_file_path
+    Graph-->>User: output path string
 ```
+
+### LangGraph のノードとエッジ
+
+実行用のグラフは `src/deep_research/graph.py` で組み立て、状態の型は `src/deep_research/state.py` の `SummaryState` です。各 **ノード** は Python の関数で、現在の状態を読み、更新分だけを辞書として返します。**エッジ**でノードを直列につなぎ、**条件付きエッジ**が「追加で調べるループ」と「次のサブトピックへ進むループ」を実現しています。
+
+| ノード                         | 役割                                                                                                                                                                                              |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `plan_research`                | LLM を一度呼び、ユーザーのテーマを `research_plans`（サブトピックのリスト）に分割する。出力ファイルのパスや蓄積用フィールドもここで初期化する。                                                   |
+| `advance_plan`                 | いま扱うサブトピックを `topic` にセットし、計画単位のフィールド（`sources`、`working_summary`、`need_more_research`、`loop_count` など）をリセットする。引用番号が全体で連なるよう `source_id_offset` も設定する。 |
+| `web_research`                 | `search_queries` があればそれで、なければ現在のサブトピック文字列で DuckDuckGo を検索し、ヒットを関連度フィルタ付きで `sources` にマージする。                                                     |
+| `fetch_pages`                  | 最大 `max_fetch_pages` 件まで HTML を取得し、各ソース行に抜粋テキストを付ける（任意の処理）。                                                                                                      |
+| `summarize_sources`            | スニペットと取得済み抜粋から、LLM が現在のサブトピック向けの **作業用要約**（`working_summary`）をまとめる。                                                                                       |
+| `reflect_on_summary`           | LLM が JSON で返す。**知識ギャップがあるか**（`need_more_research`）、短い理由（`reflection_text`）、更新後の `loop_count`（`--max-loops` および設定の `max_loops` で上限）。                      |
+| `generate_similar_questions`   | ルーティングでここに来たとき、LLM がフォローアップ用の `search_queries` を埋め、そのあと再び `web_research` へ進む。                                                                              |
+| `write_section`                | LLM が節本文だけの Markdown を書き、ノード側でレポートファイルに追記する。`section_sources` と `all_sources` を更新し、`current_plan_index` を進める。                                           |
+| `finalize_report`              | ファイル末尾に、まとめて **参考文献**ブロックを追記する。                                                                                                                                         |
+
+**固定エッジ:** `START` → `plan_research` → `advance_plan` → `web_research` → `fetch_pages` → `summarize_sources` → `reflect_on_summary`。ほかに `generate_similar_questions` → `web_research`、`finalize_report` → `END`。
+
+**条件付きエッジ:** `reflect_on_summary` のあと、`need_more_research` が真で、かつ `loop_count` が `max_loops` に達していなければ `generate_similar_questions`、それ以外は `write_section`。`write_section` のあと、`research_plans` にまだサブトピックが残っていれば `advance_plan`、なければ `finalize_report`。
+
+---
+
+## 使い方
+
+```bash
+python -m deep_research "調査したいテーマ"
+```
+
+レポートはカレントディレクトリに `report_<テーマ>.md` として書き出されます（ファイル名はテーマ文字列から決まります）。
+
+### フラグ
+
+| フラグ              | 説明                                                                                                                             |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `--model`           | 使う Ollama モデル名（`OLLAMA_MODEL` より優先）                                                                                 |
+| `--max-loops`       | サブトピックごとのリフレクション（追加調査）ループの上限（既定 3）                                                             |
+| `--max-results`     | クエリあたりの DuckDuckGo 結果数（既定 5）                                                                                       |
+| `--search-workers`  | 1 ラウンドあたりの並列 DDG クエリ数（既定 4、最大 16。`1` で逐次。環境変数 `DEEP_RESEARCH_SEARCH_WORKERS` でも指定可）           |
+| `--lang`            | `ja`（既定）または `en` — プロンプトとレポートの言語（`DEEP_RESEARCH_LANG` でも指定可）                                          |
+| `--max-plans`       | 生成するサブトピック数（5〜8、既定 6。`DEEP_RESEARCH_MAX_PLANS` でも指定可）                                                     |
+| `--fetch-pages [N]` | ラウンドあたりのフルページ取得数（既定 8。`DEEP_RESEARCH_FETCH_PAGES`）。`N` を付けて上書き。`--fetch-pages` 単体は既定値を使う。 |
+| `--fetch-workers`   | 並列 HTTP 取得数（既定 4、最大 16。`1` で逐次。`DEEP_RESEARCH_FETCH_WORKERS`）                                                   |
+| `--no-fetch-pages`  | フルページ取得をオフにし、スニペットのみで動かす                                                                                 |
+
+---
+
+## 出力ファイルの構造
+
+```markdown
+# 調査テーマ
+
+## サブトピック 1
+
+（本文とインライン引用 [1][2]…）
+
+## サブトピック 2
+
+（本文とインライン引用 [3][4]…）
+
+## 参考文献
+
+1. タイトル A — URL
+   _スニペット_
+2. タイトル B — URL
+   _スニペット_
+3. タイトル C — URL
+   …
+```
+
+- 各セクションの本文は、そのサブトピックの調査ループが終わるたび **すぐにディスクへ書き込まれる**。
+- ソース引用の番号（`[n]`）は、すべてのサブトピックを通して **ひと続きの連番**になる。
+- 参考文献は最後に `finalize_report` で **一度だけ** まとめて追記されるので、実行が途中で止まっても、それまでの本文は読める。
 
 ---
 
@@ -77,13 +133,13 @@ sequenceDiagram
 
 ### 1. Ollama のインストールとモデルの取得
 
-[Ollama をインストール](https://ollama.com/)し、モデルを pull します（推論特化モデルの例）:
+[Ollama をインストール](https://ollama.com/)し、モデルを pull します（推論向きの例）:
 
 ```bash
 ollama pull deepseek-r1:8b
 ```
 
-### 2. Python 環境の構築（Python 3.11 以上）
+### 2. Python 環境（Python 3.11 以上）
 
 ```bash
 cd /path/to/deep-research
@@ -92,7 +148,7 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-### 3. `.env` の作成（任意）
+### 3. `.env`（任意）
 
 ```env
 OLLAMA_BASE_URL=http://127.0.0.1:11434
@@ -108,65 +164,9 @@ DEEP_RESEARCH_FETCH_WORKERS=4
 
 ---
 
-## 実行
-
-```bash
-python -m deep_research "調査したいテーマ" --out report.md
-```
-
-またはコンソールスクリプトで:
-
-```bash
-deep-research "調査したいテーマ" -o report.md
-```
-
-### オプション一覧
-
-| フラグ                  | 説明                                                                                                      |
-| ----------------------- | --------------------------------------------------------------------------------------------------------- |
-| `--out` / `-o`          | 出力 Markdown ファイルのパス（省略時は `report_<テーマ>.md` として自動生成）                              |
-| `--model`               | Ollama モデル名（`OLLAMA_MODEL` を上書き）                                                                |
-| `--base-url`            | Ollama サーバー URL（`OLLAMA_BASE_URL` を上書き）                                                         |
-| `--max-loops`           | サブトピックごとの反省ループ上限（デフォルト 3）                                                          |
-| `--max-results`         | クエリあたりの DuckDuckGo 結果件数（デフォルト 5）                                                        |
-| `--search-workers`      | 並列 DDG 検索数（デフォルト 4、最大 16；`1` = 逐次；`DEEP_RESEARCH_SEARCH_WORKERS`）                      |
-| `--lang`                | `ja`（デフォルト）または `en` — プロンプト言語（`DEEP_RESEARCH_LANG`）                                    |
-| `--max-plans`           | 生成するサブトピック数の上限（5～8、デフォルト 6；`DEEP_RESEARCH_MAX_PLANS`）                             |
-| `--fetch-pages [N]`     | ラウンドごとのフルページ取得数（デフォルト 8；`DEEP_RESEARCH_FETCH_PAGES`）。`--fetch-pages` のみで既定値 |
-| `--fetch-workers`       | 並列 HTTP フェッチ数（デフォルト 4、最大 16；`1` = 逐次；`DEEP_RESEARCH_FETCH_WORKERS`）                  |
-| `--no-fetch-pages`      | フルページ取得を無効化（スニペットのみで動作）                                                            |
-
----
-
-## 出力ファイルの構造
-
-```markdown
-# 調査テーマ
-
-## サブトピック 1
-（調査結果の本文・引用 [1][2]…）
-
-## サブトピック 2
-（調査結果の本文・引用 [3][4]…）
-
-## 参考文献
-1. タイトル A — URL
-   _スニペット_
-2. タイトル B — URL
-   _スニペット_
-3. タイトル C — URL
-…
-```
-
-- 各セクションの本文はリサーチ完了後に**即時ディスク書き込み**されます。
-- ソース引用番号（`[n]`）は全サブトピックを通じて**グローバルに連番**が振られます。
-- 参考文献は最後にまとめて一括追記（`finalize_report`）されるため、途中経過でも中断後もファイルを参照できます。
-
----
-
 ## トラブルシューティング
 
-- **`Connection refused` (Ollama)**: `ollama serve` を起動し `--base-url` を確認してください。
-- **JSON パースエラー**: 小さいモデル（例: `llama3.2`）を試すか、`nodes.py` の `temperature` を下げてください。
-- **DuckDuckGo レート制限**: `--max-results` を減らす、`--search-workers 1` で逐次実行、またはしばらく待ってください。
-- **ページ取得エラー**: Bot ブロックや JavaScript 必須のサイトが多い場合は `--no-fetch-pages` を使用してください。HTTP 429 が多発する場合は `--fetch-workers 1` を試してください。
+- **`Connection refused`（Ollama）**: `ollama serve` を動かし、既定以外のホスト・ポートなら `.env` の `OLLAMA_BASE_URL` を合わせる。
+- **JSON のパースエラー**: より小さなモデル（例: `llama3.2`）を試すか、`nodes.py` の `temperature` を下げる。
+- **DuckDuckGo のレート制限**: `--max-results` を減らす、`--search-workers 1` にする、少し待つ。
+- **取得エラーや本文が空になる**: Bot 対策や JavaScript 必須のサイトが多いときは `--no-fetch-pages`。HTTP 429 が続くときは `--fetch-workers 1` を試す。

@@ -45,7 +45,7 @@ def _print_message_token(chunk) -> None:
         print(content, end="", flush=True)
 
 
-def run(topic: str, ctx: Configuration, out_path: Path | None) -> str:
+def run(topic: str, ctx: Configuration) -> str:
     graph = build_compiled_graph()
     print(
         f"\n{'='*60}\nDeep research ({ctx.language}): {topic[:200]!r}\n{'='*60}\n",
@@ -53,8 +53,6 @@ def run(topic: str, ctx: Configuration, out_path: Path | None) -> str:
     )
 
     input_state: dict = {"topic": topic}
-    if out_path is not None:
-        input_state["output_file_path"] = str(out_path)
 
     last_values: dict | None = None
     stream = graph.stream(
@@ -94,21 +92,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Local deep research agent (Ollama + LangGraph).")
     parser.add_argument("topic", help="Research question or topic")
     parser.add_argument(
-        "--out",
-        "-o",
-        type=Path,
-        default=None,
-        help="Write Markdown report to this path (default: report_<topic>.md in current directory)",
-    )
-    parser.add_argument(
         "--model",
         default=os.environ.get("OLLAMA_MODEL", "deepseek-r1:8b"),
         help="Ollama model name (default: env OLLAMA_MODEL or deepseek-r1:8b)",
-    )
-    parser.add_argument(
-        "--base-url",
-        default=os.environ.get("OLLAMA_BASE_URL"),
-        help="Ollama base URL (default: env OLLAMA_BASE_URL)",
     )
     parser.add_argument(
         "--max-loops",
@@ -181,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
 
     ctx = Configuration(
         ollama_model=args.model,
-        ollama_base_url=args.base_url,
+        ollama_base_url=os.environ.get("OLLAMA_BASE_URL"),
         max_loops=max(1, args.max_loops),
         max_results_per_query=max(1, args.max_results),
         search_parallel_workers=max(1, min(16, args.search_workers)),
@@ -192,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     try:
-        run(args.topic, ctx, args.out)
+        run(args.topic, ctx)
     except KeyboardInterrupt:
         print("\nInterrupted.", file=sys.stderr)
         return 130
