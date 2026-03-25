@@ -58,17 +58,17 @@ sequenceDiagram
 
 実行用のグラフは `src/deep_research/graph.py` で組み立て、状態の型は `src/deep_research/state.py` の `SummaryState` です。各 **ノード** は Python の関数で、現在の状態を読み、更新分だけを辞書として返します。**エッジ**でノードを直列につなぎ、**条件付きエッジ**が「追加で調べるループ」と「次のサブトピックへ進むループ」を実現しています。
 
-| ノード                                    | 役割                                                                                                                                                                                              |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `create_subtopics`                        | LLM を一度呼び、ユーザーのテーマを `research_plans`（サブトピックのリスト）に分割する。出力ファイルのパスや蓄積用フィールドもここで初期化する。                                                   |
-| `load_next_subtopic`                      | いま扱うサブトピックを `topic` にセットし、計画単位のフィールド（`sources`、`working_summary`、`need_more_research`、`loop_count` など）をリセットする。引用番号が全体で連なるよう `source_id_offset` も設定する。 |
-| `search_web`                              | `search_queries` があればそれで、なければ現在のサブトピック文字列で DuckDuckGo を検索し、ヒットを関連度フィルタ付きで `sources` にマージする。                                                     |
-| `fetch_page_content`                      | 最大設定件数まで HTML を取得し、各ソース行に抜粋テキストを付ける（任意の処理）。                                                                                                                  |
-| `summarize_sources`                       | スニペットと取得済み抜粋から、LLM が現在のサブトピック向けの **作業用要約**（`working_summary`）をまとめる。                                                                                       |
-| `evaluate_coverage`                       | LLM が JSON で返す。**知識ギャップがあるか**（`need_more_research`）、短い理由（`reflection_text`）、更新後の `loop_count`（`--max-loops` および設定の `max_loops` で上限）。                      |
-| `generate_similar_question_if_necessary`  | ルーティングでここに来たとき、LLM がフォローアップ用の `search_queries` を埋め、そのあと再び `search_web` へ進む。                                                                                |
-| `write_section`                           | LLM が節本文だけの Markdown を書き、ノード側でレポートファイルに追記する。`section_sources` と `all_sources` を更新し、`current_plan_index` を進める。                                           |
-| `finalize_report`                         | ファイル末尾に、まとめて **参考文献**ブロックを追記する。                                                                                                                                         |
+| ノード                                   | 役割                                                                                                                                                                                                               |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `create_subtopics`                       | LLM を一度呼び、ユーザーのテーマを `research_plans`（サブトピックのリスト）に分割する。出力ファイルのパスや蓄積用フィールドもここで初期化する。                                                                    |
+| `load_next_subtopic`                     | いま扱うサブトピックを `topic` にセットし、計画単位のフィールド（`sources`、`working_summary`、`need_more_research`、`loop_count` など）をリセットする。引用番号が全体で連なるよう `source_id_offset` も設定する。 |
+| `search_web`                             | `search_queries` があればそれで、なければ現在のサブトピック文字列で DuckDuckGo を検索し、ヒットを関連度フィルタ付きで `sources` にマージする。                                                                     |
+| `fetch_page_content`                     | 最大設定件数まで HTML を取得し、各ソース行に抜粋テキストを付ける（任意の処理）。                                                                                                                                   |
+| `summarize_sources`                      | スニペットと取得済み抜粋から、LLM が現在のサブトピック向けの **作業用要約**（`working_summary`）をまとめる。                                                                                                       |
+| `evaluate_coverage`                      | LLM が JSON で返す。**知識ギャップがあるか**（`need_more_research`）、短い理由（`reflection_text`）、更新後の `loop_count`（`--max-loops` および設定の `max_loops` で上限）。                                      |
+| `generate_similar_question_if_necessary` | ルーティングでここに来たとき、LLM がフォローアップ用の `search_queries` を埋め、そのあと再び `search_web` へ進む。                                                                                                 |
+| `write_section`                          | LLM が節本文だけの Markdown を書き、ノード側でレポートファイルに追記する。`section_sources` と `all_sources` を更新し、`current_plan_index` を進める。                                                             |
+| `finalize_report`                        | ファイル末尾に、まとめて **参考文献**ブロックを追記する。                                                                                                                                                          |
 
 **固定エッジ:** `START` → `create_subtopics` → `load_next_subtopic` → `search_web` → `fetch_page_content` → `summarize_sources` → `evaluate_coverage`。ほかに `generate_similar_question_if_necessary` → `search_web`、`finalize_report` → `END`。
 
@@ -76,27 +76,19 @@ sequenceDiagram
 
 ---
 
-## 使い方
-
-```bash
-python -m deep_research "調査したいテーマ"
-```
-
-レポートはカレントディレクトリに `report_<テーマ>.md` として書き出されます（ファイル名はテーマ文字列から決まります）。
-
 ### フラグ
 
-| フラグ              | 説明                                                                                                                             |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `--model`           | 使う Ollama モデル名（`OLLAMA_MODEL` より優先）                                                                                 |
-| `--max-loops`       | サブトピックごとのリフレクション（追加調査）ループの上限（既定 3）                                                             |
-| `--max-results`     | クエリあたりの DuckDuckGo 結果数（既定 5）                                                                                       |
-| `--search-workers`  | 1 ラウンドあたりの並列 DDG クエリ数（既定 4、最大 16。`1` で逐次。環境変数 `DEEP_RESEARCH_SEARCH_WORKERS` でも指定可）           |
-| `--lang`            | `ja`（既定）または `en` — プロンプトとレポートの言語（`DEEP_RESEARCH_LANG` でも指定可）                                          |
-| `--max-plans`       | 生成するサブトピック数（5〜8、既定 6。`DEEP_RESEARCH_MAX_PLANS` でも指定可）                                                     |
+| フラグ              | 説明                                                                                                                              |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `--model`           | 使う Ollama モデル名（`OLLAMA_MODEL` より優先）                                                                                   |
+| `--max-loops`       | サブトピックごとのリフレクション（追加調査）ループの上限（既定 3）                                                                |
+| `--max-results`     | クエリあたりの DuckDuckGo 結果数（既定 5）                                                                                        |
+| `--search-workers`  | 1 ラウンドあたりの並列 DDG クエリ数（既定 4、最大 16。`1` で逐次。環境変数 `DEEP_RESEARCH_SEARCH_WORKERS` でも指定可）            |
+| `--lang`            | `ja`（既定）または `en` — プロンプトとレポートの言語（`DEEP_RESEARCH_LANG` でも指定可）                                           |
+| `--max-plans`       | 生成するサブトピック数（5〜8、既定 6。`DEEP_RESEARCH_MAX_PLANS` でも指定可）                                                      |
 | `--fetch-pages [N]` | ラウンドあたりのフルページ取得数（既定 8。`DEEP_RESEARCH_FETCH_PAGES`）。`N` を付けて上書き。`--fetch-pages` 単体は既定値を使う。 |
-| `--fetch-workers`   | 並列 HTTP 取得数（既定 4、最大 16。`1` で逐次。`DEEP_RESEARCH_FETCH_WORKERS`）                                                   |
-| `--no-fetch-pages`  | フルページ取得をオフにし、スニペットのみで動かす                                                                                 |
+| `--fetch-workers`   | 並列 HTTP 取得数（既定 4、最大 16。`1` で逐次。`DEEP_RESEARCH_FETCH_WORKERS`）                                                    |
+| `--no-fetch-pages`  | フルページ取得をオフにし、スニペットのみで動かす                                                                                  |
 
 ---
 
@@ -162,7 +154,13 @@ DEEP_RESEARCH_SEARCH_WORKERS=4
 DEEP_RESEARCH_FETCH_WORKERS=4
 ```
 
----
+## 使い方
+
+```bash
+python -m deep_research "調査したいテーマ"
+```
+
+## レポートはカレントディレクトリに `report_<テーマ>.md` として書き出されます（ファイル名はテーマ文字列から決まります）。
 
 ## トラブルシューティング
 

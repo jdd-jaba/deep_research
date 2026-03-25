@@ -72,14 +72,6 @@ The runnable graph is built in `src/deep_research/graph.py` on top of `SummarySt
 
 ---
 
-## Usage
-
-```bash
-python -m deep_research "Your research question"
-```
-
-The report is written to `report_<topic>.md` in the current directory (derived from the topic string).
-
 ### Flags
 
 | Flag                | Description                                                                                                                      |
@@ -157,6 +149,14 @@ DEEP_RESEARCH_FETCH_PAGES=8
 DEEP_RESEARCH_SEARCH_WORKERS=4
 DEEP_RESEARCH_FETCH_WORKERS=4
 ```
+
+## Usage
+
+```bash
+python -m deep_research "Your research question"
+```
+
+The report is written to `report_<topic>.md` in the current directory (derived from the topic string).
 
 ---
 
