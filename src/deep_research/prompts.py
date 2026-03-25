@@ -19,18 +19,18 @@ _SYSTEM: dict[Lang, dict[str, str]] = {
         "plan_research": (
             "You generate a structured research plan. Reply with one JSON object only, no markdown fences, shape:\n"
             '{"plans": ["subtopic 1", "subtopic 2", ...]}\n'
-            "Break the main topic into 4-7 focused, distinct subtopics that together give comprehensive coverage. "
+            "Break the main topic into 5-8 focused, distinct subtopics that together give comprehensive coverage. "
             "Each subtopic should be a short, specific research question or angle that can be researched independently. "
             "Subtopics must be non-overlapping. Write each string in English. "
             "No other keys, no prose outside JSON."
         ),
         "generate_similar_questions": (
-            "You generate similar search questions for web research. Reply with one JSON object only, "
+            "You generate a follow-up search query for web research. Reply with one JSON object only, "
             "no markdown fences, shape:\n"
-            '{"similar_questions": ["...", "..."]}\n'
-            "Include 3 to 6 diverse, concrete questions/phrases that would make good search engine queries "
-            "and together cover the user's subtopic from different angles. Write each string in English. "
-            "Do NOT generate questions that overlap with already-written sections listed by the user. "
+            '{"similar_questions": ["..."]}\n'
+            "Include exactly 1 targeted search query that directly addresses the specific gap identified "
+            "in the prior reflection. Write the string in English. "
+            "Do NOT generate a query that overlaps with already-written sections listed by the user. "
             "No other keys, no prose outside JSON."
         ),
         "summarize_sources": (
@@ -50,8 +50,9 @@ _SYSTEM: dict[Lang, dict[str, str]] = {
         "write_section": (
             "You write ONE comprehensive section of a deep research report in Markdown. Requirements:\n"
             "- First line must be exactly: ## <subtopic> (use the subtopic title you are given, verbatim)\n"
-            "- Then write several detailed, well-structured paragraphs (aim for depth; "
-            "use sub-headings ### or tables only where they add clarity, not as padding)\n"
+            "- Then write several detailed, well-structured paragraphs (aim for depth)\n"
+            "- Structure content with ### sub-headings, NOT numbered lists (1. 2. 3.); "
+            "use bullet points only for short, truly list-like items\n"
             "- Use inline [n] citations only for source ids from the provided list; never invent ids\n"
             "- Do NOT add a top-level # title and do NOT add a References/Sources section "
             "(references are handled separately)\n"
@@ -65,15 +66,15 @@ _SYSTEM: dict[Lang, dict[str, str]] = {
         "plan_research": (
             "構造化された調査計画を作成します。マークダウンのコードブロックは使わず、JSONオブジェクトのみを出力してください。\n"
             '形式: {"plans": ["サブトピック1", "サブトピック2", ...]}\n'
-            "メインテーマを 4〜7 個の焦点が絞られた異なるサブトピックに分解し、全体として包括的な調査ができるようにしてください。"
+            "メインテーマを 5〜8 個の焦点が絞られた異なるサブトピックに分解し、全体として包括的な調査ができるようにしてください。"
             "各サブトピックは独立して調査できる、具体的な問いや切り口にしてください。"
             "サブトピック同士は重複させないでください。各文字列は日本語で書いてください。JSON 以外の文章は書かないでください。"
         ),
         "generate_similar_questions": (
-            "あなたはウェブ検索用の「類似の調査質問」を生成します。マークダウンのコードブロックは使わず、JSONオブジェクトのみを出力してください。\n"
-            '形式: {"similar_questions": ["...", "..."]}\n'
-            "ユーザーの現在のサブトピックを異なる角度からカバーする、具体的で検索に向いた質問文を 3〜6 個含めてください。"
-            "すでに書き済みのセクションと重複する質問は生成しないでください。"
+            "あなたはウェブ検索用のフォローアップ検索クエリを生成します。マークダウンのコードブロックは使わず、JSONオブジェクトのみを出力してください。\n"
+            '形式: {"similar_questions": ["..."]}\n'
+            "前回のリフレクションで指摘された不足点を直接補う、具体的で検索に向いたクエリを 1 個だけ含めてください。"
+            "すでに書き済みのセクションと重複するクエリは生成しないでください。"
             "言語はユーザーの質問と揃えてください。JSON 以外の文章は書かないでください。"
         ),
         "summarize_sources": (
@@ -92,7 +93,9 @@ _SYSTEM: dict[Lang, dict[str, str]] = {
         "write_section": (
             "調査レポートの「1つのセクション」だけを Markdown で書きます。要件:\n"
             "- 1 行目は必ず次の形式: ## （指定されたサブトピックタイトルをそのまま使用）\n"
-            "- その後、十分な量の段落で詳述する（深さを重視。サブ見出し ### や表は明快さを増す場合のみ使用）\n"
+            "- その後、十分な量の段落で詳述する（深さを重視）\n"
+            "- 内容は「1. 2. 3.」のような番号付きリストではなく、### サブ見出しで構成する。"
+            "短い箇条書き項目にのみ「-」を使用する\n"
             "- 引用は [n] 形式のみ。与えられたソース id のみ。捏造しない\n"
             "- トップレベルの # タイトルは付けない。参考文献セクションは付けない（別途追加される）\n"
             "- 「すでに書いたセクション」が提示されている場合は、その内容の繰り返し・再説明をしない。"

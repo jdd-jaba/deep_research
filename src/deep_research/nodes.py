@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import re
+import threading
+import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from pathlib import Path
@@ -20,6 +23,48 @@ from deep_research.state import Configuration, SummaryState
 
 # Cap prior-section text passed to write_section prompt to keep context bounded.
 _WRITE_SECTION_PRIOR_MAX_CHARS = 30_000
+
+# ---------------------------------------------------------------------------
+# Slow-request sliding window counter
+# ---------------------------------------------------------------------------
+# Counts requests that take >= SLOW_THRESHOLD_SECS within the last SLOW_WINDOW_SECS.
+# Shared across all threads; used by both web_research (DDG) and fetch_pages (HTTP).
+
+_SLOW_THRESHOLD_SECS: float = 20.0
+_SLOW_WINDOW_SECS: float = 300.0  # 5 minutes
+
+
+class _SlowRequestCounter:
+    """Thread-safe sliding window counter for requests exceeding a time threshold."""
+
+    def __init__(self, threshold: float = _SLOW_THRESHOLD_SECS, window: float = _SLOW_WINDOW_SECS) -> None:
+        self.threshold = threshold
+        self.window = window
+        self._timestamps: deque[float] = deque()
+        self._lock = threading.Lock()
+
+    def record(self, elapsed: float) -> int:
+        """Record elapsed time. If >= threshold, add to window. Returns current slow count."""
+        now = time.monotonic()
+        with self._lock:
+            self._evict(now)
+            if elapsed >= self.threshold:
+                self._timestamps.append(now)
+            return len(self._timestamps)
+
+    def count(self) -> int:
+        """Return how many slow requests occurred within the current window."""
+        with self._lock:
+            self._evict(time.monotonic())
+            return len(self._timestamps)
+
+    def _evict(self, now: float) -> None:
+        cutoff = now - self.window
+        while self._timestamps and self._timestamps[0] < cutoff:
+            self._timestamps.popleft()
+
+
+_slow_counter = _SlowRequestCounter()
 
 
 def _truncate_prior_sections(text: str, max_chars: int, lang: str) -> str:
@@ -142,7 +187,7 @@ def plan_research(state: SummaryState, runtime: Runtime[Configuration]) -> dict:
     cfg = runtime.context
     lang = cfg.language
     main_topic = state["topic"]
-    cap = max(3, min(cfg.max_plan_sections, 8))
+    cap = max(5, min(cfg.max_plan_sections, 8))
     print(f"\n--- Phase: plan_research — breaking topic into ≤{cap} subtopics\n", flush=True)
 
     llm = _llm(cfg)

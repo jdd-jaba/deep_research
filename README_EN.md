@@ -4,7 +4,7 @@
 
 A local **deep research CLI** powered by **LangGraph**, **Ollama**, **DuckDuckGo** (`ddgs`), and full-page fetch (**httpx + trafilatura**).
 
-The topic is first **broken into N subtopics** (`plan_research`). For each subtopic, a research loop of search → fetch → summarize → reflect runs until the model is satisfied, then that subtopic's section is **immediately written to disk** (`write_section`) before moving to the next. This keeps local context window usage bounded while producing a **long-form Markdown report**.
+The topic is first **broken into 5–8 subtopics** (`plan_research`). For each subtopic, a direct web search is run first. If the model decides more research is needed, it generates **1 targeted follow-up query** and searches again — repeating until satisfied. Then that subtopic's section is **immediately written to disk** (`write_section`) before moving to the next. This keeps local context window usage bounded while producing a **long-form Markdown report**.
 
 ---
 
@@ -29,12 +29,24 @@ sequenceDiagram
         Graph->>Graph: advance_plan
         Note right of Graph: Set subtopic, reset per-plan state, set source ID offset
 
-        loop Research loop (while need_more_research = true)
+        Graph->>DDG: web_research (plan topic as query)
+        DDG-->>Graph: URLs + snippets (globally numbered IDs)
+
+        Graph->>Web: fetch_pages (parallel)
+        Web-->>Graph: page text
+
+        Graph->>LLM: summarize_sources
+        LLM-->>Graph: working summary
+
+        Graph->>LLM: reflect_on_summary
+        LLM-->>Graph: need_more_research: true / false
+
+        loop Only if need_more_research = true
             Graph->>LLM: generate_similar_questions
-            LLM-->>Graph: search queries
+            LLM-->>Graph: 1 targeted follow-up query
 
             Graph->>DDG: web_research (parallel)
-            DDG-->>Graph: URLs + snippets (globally numbered IDs)
+            DDG-->>Graph: URLs + snippets
 
             Graph->>Web: fetch_pages (parallel)
             Web-->>Graph: page text
@@ -119,7 +131,7 @@ deep-research "Your research question" -o report.md
 | `--max-results`       | DuckDuckGo results per query (default 5)                                                                                          |
 | `--search-workers`    | Parallel DDG queries per round (default 4, max 16; `1` = sequential; or `DEEP_RESEARCH_SEARCH_WORKERS`)                           |
 | `--lang`              | `ja` (default) or `en` — prompt and report language (or `DEEP_RESEARCH_LANG`)                                                    |
-| `--max-plans`         | Number of subtopics to generate (3–8, default 6; or `DEEP_RESEARCH_MAX_PLANS`)                                                   |
+| `--max-plans`         | Number of subtopics to generate (5–8, default 6; or `DEEP_RESEARCH_MAX_PLANS`)                                                   |
 | `--fetch-pages [N]`   | Full-page fetches per round (default 8; or `DEEP_RESEARCH_FETCH_PAGES`). Pass `N` to override; `--fetch-pages` uses the default. |
 | `--fetch-workers`     | Parallel HTTP fetches (default 4, max 16; `1` = sequential; or `DEEP_RESEARCH_FETCH_WORKERS`)                                     |
 | `--no-fetch-pages`    | Disable full-page fetch (snippets only)                                                                                           |

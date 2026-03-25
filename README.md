@@ -4,7 +4,7 @@
 
 ローカル動作の **ディープリサーチ CLI**。**LangGraph** でグラフを構成し、**Ollama** を LLM として使用、**DuckDuckGo**（`ddgs`）で検索、**httpx + trafilatura** でページ本文を取得。
 
-トピックをまず **N 個のサブトピックに分解**し（`plan_research`）、サブトピックごとに「検索 → フェッチ → 要約 → 反省」のループを繰り返し、十分な情報が集まった時点でそのサブトピックの節を **Markdown ファイルに即時書き出し**（`write_section`）してから次のサブトピックに進みます。ローカルの文脈ウィンドウを節約しながら **長文レポート**を生成できます。
+トピックをまず **5〜8 個のサブトピックに分解**し（`plan_research`）、サブトピックごとにまず直接 Web 検索を実行します。情報が不足していると判断された場合は **1 件のフォローアップクエリ**を生成して再検索し、十分な情報が集まるまでループします。その後そのサブトピックの節を **Markdown ファイルに即時書き出し**（`write_section`）してから次のサブトピックに進みます。ローカルの文脈ウィンドウを節約しながら **長文レポート**を生成できます。
 
 ---
 
@@ -29,12 +29,24 @@ sequenceDiagram
         Graph->>Graph: advance_plan
         Note right of Graph: サブトピックをセット・状態リセット・ソースID オフセット設定
 
-        loop 調査ループ（反省で more=true の間）
+        Graph->>DDG: web_research（プラン名をクエリとして検索）
+        DDG-->>Graph: URL + スニペット（グローバル連番 ID）
+
+        Graph->>Web: fetch_pages（並列）
+        Web-->>Graph: ページ本文テキスト
+
+        Graph->>LLM: summarize_sources
+        LLM-->>Graph: 作業用要約
+
+        Graph->>LLM: reflect_on_summary
+        LLM-->>Graph: need_more_research: true / false
+
+        loop need_more_research = true の場合のみ
             Graph->>LLM: generate_similar_questions
-            LLM-->>Graph: 検索クエリ群
+            LLM-->>Graph: フォローアップクエリ 1 件
 
             Graph->>DDG: web_research（並列）
-            DDG-->>Graph: URL + スニペット（グローバル連番 ID）
+            DDG-->>Graph: URL + スニペット
 
             Graph->>Web: fetch_pages（並列）
             Web-->>Graph: ページ本文テキスト
@@ -119,7 +131,7 @@ deep-research "調査したいテーマ" -o report.md
 | `--max-results`         | クエリあたりの DuckDuckGo 結果件数（デフォルト 5）                                                        |
 | `--search-workers`      | 並列 DDG 検索数（デフォルト 4、最大 16；`1` = 逐次；`DEEP_RESEARCH_SEARCH_WORKERS`）                      |
 | `--lang`                | `ja`（デフォルト）または `en` — プロンプト言語（`DEEP_RESEARCH_LANG`）                                    |
-| `--max-plans`           | 生成するサブトピック数の上限（3〜8、デフォルト 6；`DEEP_RESEARCH_MAX_PLANS`）                             |
+| `--max-plans`           | 生成するサブトピック数の上限（5～8、デフォルト 6；`DEEP_RESEARCH_MAX_PLANS`）                             |
 | `--fetch-pages [N]`     | ラウンドごとのフルページ取得数（デフォルト 8；`DEEP_RESEARCH_FETCH_PAGES`）。`--fetch-pages` のみで既定値 |
 | `--fetch-workers`       | 並列 HTTP フェッチ数（デフォルト 4、最大 16；`1` = 逐次；`DEEP_RESEARCH_FETCH_WORKERS`）                  |
 | `--no-fetch-pages`      | フルページ取得を無効化（スニペットのみで動作）                                                            |

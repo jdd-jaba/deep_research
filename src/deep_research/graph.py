@@ -64,8 +64,8 @@ def build_compiled_graph():
     builder.add_edge(START, "plan_research")
     builder.add_edge("plan_research", "advance_plan")
 
-    # Per-plan research loop
-    builder.add_edge("advance_plan", "generate_similar_questions")
+    # Per-plan research loop — start with direct web search using the plan topic
+    builder.add_edge("advance_plan", "web_research")
     builder.add_edge("generate_similar_questions", "web_research")
     builder.add_edge("web_research", "fetch_pages")
     builder.add_edge("fetch_pages", "summarize_sources")
