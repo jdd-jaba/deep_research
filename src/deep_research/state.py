@@ -10,7 +10,7 @@ from typing import NotRequired, TypedDict
 class Configuration:
     """Static context passed to each graph run (`context=...` on invoke/stream)."""
 
-    ollama_model: str = "llama3.2"
+    ollama_model: str = "deepseek-r1:8b"
     ollama_base_url: str | None = None
     max_loops: int = 3
     max_results_per_query: int = 5

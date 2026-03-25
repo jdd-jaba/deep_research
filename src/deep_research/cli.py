@@ -48,7 +48,16 @@ def _print_message_token(chunk) -> None:
 def run(topic: str, ctx: Configuration) -> str:
     graph = build_compiled_graph()
     print(
-        f"\n{'='*60}\nDeep research ({ctx.language}): {topic[:200]!r}\n{'='*60}\n",
+        f"\n{'='*60}\n"
+        f"Deep Research\n"
+        f"{'='*60}\n"
+        f"Topic: {topic[:200]!r}\n"
+        f"Model: {ctx.ollama_model}\n"
+        f"Language: {ctx.language}\n"
+        f"Max loops: {ctx.max_loops}\n"
+        f"Max subtopics: {ctx.max_plan_sections}\n"
+        f"Page fetching: {'enabled (' + str(ctx.max_fetch_pages) + ' pages)' if ctx.max_fetch_pages > 0 else 'disabled'}\n"
+        f"{'='*60}\n",
         flush=True,
     )
 
@@ -93,8 +102,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("topic", help="Research question or topic")
     parser.add_argument(
         "--model",
-        default=os.environ.get("OLLAMA_MODEL", "llama3.2"),
-        help="Ollama model name (default: env OLLAMA_MODEL or llama3.2)",
+        default=os.environ.get("OLLAMA_MODEL", "deepseek-r1:8b"),
+        help="Ollama model name (default: env OLLAMA_MODEL or deepseek-r1:8b)",
     )
     parser.add_argument(
         "--max-loops",
